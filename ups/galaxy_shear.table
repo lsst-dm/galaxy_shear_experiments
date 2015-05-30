@@ -1,0 +1,4 @@
+setupRequired(afw 10.0+3 [>= 10.0+3])
+setupRequired(meas_base 10.0+2 [>= 10.0+2])
+
+envPrepend(PYTHONPATH, ${PRODUCT_DIR}/python)

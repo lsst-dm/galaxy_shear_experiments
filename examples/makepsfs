@@ -1,0 +1,2 @@
+python $GALAXY_SHEAR_DIR/bin/cutoutPsfs.py pars image.fits.gz
+python $GALAXY_SHEAR_DIR/bin/packagePsfs.py -d psf.fits
