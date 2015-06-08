@@ -37,11 +37,12 @@ import lsst.meas.base as measBase
 import lsst.meas.algorithms as measAlg
 
 parser = argparse.ArgumentParser()
+parser.add_argument("input_directory", help="Name of the input directory")
 parser.add_argument("output_file", help="Name of multi-psf fits file")
 parser.add_argument("-d", "--delete", help="delete individual psf.fits files", action="store_true")
 args = parser.parse_args()
 
-draw_psf_src = "./"
+draw_psf_src = args.input_directory
 listing = os.listdir(draw_psf_src)
 psf_numbers = []
 hdus = None
@@ -56,9 +57,12 @@ print psf_numbers.sort()
 if len(psf_numbers) < 2:
     print "Fewer than 2 psfs_[0-9]*.fits files found"
     sys.exit(1)
-hdus = pyfits.open("psfs_%d.fits"%psf_numbers[0])
+hdus = pyfits.open("%s/psfs_%d.fits"%(draw_psf_src, psf_numbers[0]))
 for psf_number in psf_numbers[1:]:
-   hdus.append(pyfits.open("psfs_%d.fits"%psf_number)[0])
+   hdus.append(pyfits.open("%s/psfs_%d.fits"%(draw_psf_src, psf_number))[0])
+for i in range(len(hdus)):
+    hdus[i].header.append(("PSF_NO",psf_numbers[i]))
+
 hdus.writeto(args.output_file, clobber=True)
 print "%s file created with %d files"%(args.output_file, len(psf_numbers))
 
