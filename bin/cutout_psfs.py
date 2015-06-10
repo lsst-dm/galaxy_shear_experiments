@@ -40,20 +40,17 @@ psfSize = 33
 parser = argparse.ArgumentParser()
 parser.add_argument("catalog", help="Name of the star catalog fed to OpSim")
 parser.add_argument("image", help="Name of the star grid produced by OpSim")
+parser.add_argument("output_dir", help="Name of the output directory")
 args = parser.parse_args()
-
-if len(sys.argv) != 3:
-    print "the catalog file and the image file are required arguments"
-    sys.exit(1)
 
 cat = open(args.catalog, 'r')
 exp = afwImage.ExposureF(args.image)
 
 # Create an XYTransform from TanPixels to Pixels.  This is the transform
-# needed to remove the optical distortion from the Psf.
+# needed to remove the optical distortion from the Psf. Use R22_S11 as center
 butler = dafPersist.Butler(root=os.path.join(os.path.dirname(__file__), "."))
 camera = butler.get("camera", immediate=True)
-det = camera["R:1,0 S:0,0"]
+det = camera["R:2,2 S:1,1"]
 tm = det.getTransformMap()
 for sys in tm.getCoordSysList():
     if sys.getSysName() == "Pixels":
@@ -80,6 +77,7 @@ while True:
     line = cat.readline()
     if len(line) == 0:
         break
+    # catalog lines with objects have x,y position at index 2,3.  Use that for 1st guess
     attrs = line.split()
     if attrs[0] != "object": continue
     coord = afwCoord.Coord(afwGeom.Point2D(float(attrs[2]), float(attrs[3])))
@@ -104,6 +102,7 @@ while True:
         dy = int(round(record.get("_y"))) - y
         starBBox.shift(afwGeom.Extent2I(dx, dy))
 
+        # if the exposure still contains the cutout, use it.
         if exp.getBBox().contains(starBBox):
             subImage = afwImage.ImageF(exp.getMaskedImage().getImage(), starBBox)
 
@@ -113,7 +112,7 @@ while True:
             kernel = afwMath.FixedKernel(afwImage.ImageD(data))
             psf = measAlg.KernelPsf(kernel)
             warpedPsf = measAlg.WarpedPsf(psf, xytransform, "lanczos3");
-            filename = "psfs_%d.fits"%psfIndex
+            filename = "%s/psfs_%d.fits"%(args.output_dir, psfIndex)
             warpedPsf.computeImage().writeFits(filename)
             print starBBox
             hdus = pyfits.open(filename)

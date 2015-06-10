@@ -36,16 +36,20 @@ import lsst.afw.table as afwTable
 import lsst.meas.base as measBase
 import lsst.meas.algorithms as measAlg
 
+# Script to combine a directory of many psf cutouts into a single
+# multiple extension fits file
+
 parser = argparse.ArgumentParser()
 parser.add_argument("input_directory", help="Name of the input directory")
 parser.add_argument("output_file", help="Name of multi-psf fits file")
-parser.add_argument("-d", "--delete", help="delete individual psf.fits files", action="store_true")
 args = parser.parse_args()
 
 draw_psf_src = args.input_directory
 listing = os.listdir(draw_psf_src)
 psf_numbers = []
 hdus = None
+
+# Search for appropriately names psfs_nnnn.fits files in the psf directory
 for file in listing:
     index1 = file.find("psfs_")
     index2 = file.find(".fits")
@@ -53,21 +57,19 @@ for file in listing:
     number = file[index1+5:index2]
     if number.isdigit():
         psf_numbers.append(int(number))
-print psf_numbers.sort()
 if len(psf_numbers) < 2:
-    print "Fewer than 2 psfs_[0-9]*.fits files found"
+    print "Fewer than 2 psfs_[0-9]*.fits files found. Not creating package"
     sys.exit(1)
 hdus = pyfits.open("%s/psfs_%d.fits"%(draw_psf_src, psf_numbers[0]))
 for psf_number in psf_numbers[1:]:
    hdus.append(pyfits.open("%s/psfs_%d.fits"%(draw_psf_src, psf_number))[0])
+
+# Add the original number to the header of each hdu
 for i in range(len(hdus)):
     hdus[i].header.append(("PSF_NO",psf_numbers[i]))
 
+# Write the multiple extension fits file to the output file
 hdus.writeto(args.output_file, clobber=True)
 print "%s file created with %d files"%(args.output_file, len(psf_numbers))
 
-# delete the individual psf files if requested to
-if args.delete:
-    for psf_number in psf_numbers:
-        os.unlink("psfs_%d.fits"%psf_number)
 
