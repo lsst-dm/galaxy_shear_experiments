@@ -1,2 +1,3 @@
+mkdir sample_psfs
 python $GALAXY_SHEAR_EXPERIMENTS_DIR/bin/cutout_psfs.py pars image.fits.gz sample_psfs
 python $GALAXY_SHEAR_EXPERIMENTS_DIR/bin/package_psfs.py sample_psfs psf.fits
