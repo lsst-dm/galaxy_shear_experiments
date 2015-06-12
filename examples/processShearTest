@@ -1,0 +1,1 @@
+python ../bin/processShearTest.py data2  --id subfield=0 epoch=0 --output out2
