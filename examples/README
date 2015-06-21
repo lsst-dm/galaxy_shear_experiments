@@ -1,0 +1,5 @@
+Sample of OpSim Psf cutout scripts.
+
+makepsfs is a shell script which calls the necessary python scripts in the bin directory.
+
+pars and image.fits.gz are sample OpSim input catalog and output image.
