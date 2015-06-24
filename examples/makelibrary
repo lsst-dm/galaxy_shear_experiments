@@ -1,0 +1,3 @@
+#   Trial program for running makePsfLibrary, which converts a set of PhoSim images
+#   into a library of multi-hdu psfs.fits files, one per LSST raft
+python ../bin/makePsfLibrary.py pars . image .
