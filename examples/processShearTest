@@ -1,0 +1,3 @@
+date
+python ../bin/processShearTest.py  control/ground/constant  -j 8 --configfile=processShearTest.py --id subfield=0 epoch=0 --output out6b
+date

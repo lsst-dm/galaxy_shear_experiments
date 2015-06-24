@@ -53,7 +53,7 @@ def main(args):
             else:
                 psfDict[psf_number] = i
     else:
-        psfFormat = args.psfs + "/psfs_%d.fits"
+        psfFormat = args.psfs + "/psf_%d.fits"
     
     i_psf_number = getIndex("psf_number", cat)
     i_index = getIndex("index", cat)
