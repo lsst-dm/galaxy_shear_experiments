@@ -47,8 +47,9 @@ rafts = ["R01","R02","R03","R10","R11","R12","R13","R14","R20","R21","R22","R23"
     @param[in]  basename         prefix for the fits.gz files, excluding Rnn_Smm.fits.gz
     @param[in]  output_dir       Directory in which to place the output libraries.
 
-    The output index is placed in output_dir/basename.index
-    The library is collected in fits files named output_dir/basename_Rnn.psfs.fits
+    The output index is placed in output_dir/psfs.index
+    The library is written to output_dir/basename/psfs/psf_library_nn.fits
+    where nn is a two digit form of the raft number
 """
 
 #   This routine takes a list of images and a catalog name (presumably covering the
@@ -153,12 +154,17 @@ def makeSubLibrary(images, catname, output_file, fout):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("catalog", help="Name of the star catalog fed to OpSim")
-    parser.add_argument("input_dir", help="Name of the star grid produced by OpSim")
+    parser.add_argument("input_dir", help="Name of the input dir containing the images")
     parser.add_argument("basename", help="Name of the star grid produced by OpSim")
     parser.add_argument("output_dir", help="Name of the output directory")
     args = parser.parse_args()
     # List of available rafts for each focal plane
-    fout = open(args.output_dir + "/" + args.basename + ".index", "w")
+    baseDir = args.output_dir + "/" + args.basename
+    if not os.path.isdir(baseDir):
+        os.mkdir(baseDir)
+    if not os.path.isdir(baseDir + "/psfs"):
+        os.mkdir(baseDir + "/psfs")
+    fout = open(baseDir + "/psfs/psfs.index", "w")
     for raft in rafts:
         images = []
         for file in os.listdir(args.input_dir):
@@ -167,9 +173,9 @@ if __name__ == "__main__":
                 if os.path.isfile(imagename):
                     images.append(imagename)
         catname = args.input_dir + "/" + args.catalog
-        output_file = args.output_dir + "/" + args.basename + "." + raft + ".psfs.fits"
+        output_file = baseDir + "/psfs/psf_library_" + raft[1:3] + ".fits"
         #   If there are any images for this raft, cutout the Psfs and place in a mini-library
         if len(images) > 0:
-            makeSubLibrary(images, args.input_dir + "/" + args.catalog, output_file, fout)
+            makeSubLibrary(images, catname, output_file, fout)
         del images 
     fout.close()

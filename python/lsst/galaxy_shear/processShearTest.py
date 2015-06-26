@@ -34,7 +34,11 @@ from lsst.obs.great3.processBase import *
 
 class ProcessShearTestConfig(ProcessBaseConfig):
     pass
-
+"""
+   This subclass obs.great3.ProcessBaseTask is used to call a measurement algorithm,
+   assumed to be the only algorithm which is not a Centroid algorithm, using as its
+   sources a GalSim catalog provided by the "epoch_catalog" for the dataId
+"""
 class ProcessShearTestTask(ProcessBaseTask):
 
     ConfigClass = ProcessShearTestConfig
@@ -43,14 +47,18 @@ class ProcessShearTestTask(ProcessBaseTask):
 
     def __init__(self, **kwds):
         ProcessBaseTask.__init__(self, **kwds)
-        self.schema.addField("psf_index", type = long, doc = "used for psf indexing")
-        self.schema.addField("psf_file_number", type = int, doc = "used for psf indexing")
+        self.schema.addField("psf_index", type = int, doc = "index of psf within library")
+        self.schema.addField("psf_library", type = int, doc = "number of psf_libary_nn.fits")
+        self.centroidPlugin = None
+        self.measPlugin = None
         for plugin in self.measurement.plugins.keys():
-            if plugin.find("Shape") > 0:
-                self.plugin = self.measurement.plugins[plugin]
             if plugin.find("Centroid") > 0:
-                self.pluginc = self.measurement.plugins[plugin]
+                self.centroidPlugin = self.measurement.plugins[plugin]
+            else:
+                self.measPlugin = self.measurement.plugins[plugin]
 
+    #   Transfer information already know about the sources from the GalSim epoch catalog
+    #   to an afwTable catalog.  The Psf library and index in particular are needed.
     def buildSourceCatalog(self, imageBBox, dataRef):
         """Build an empty source catalog, using the provided sim catalog's position to generate
         square Footprints and its ID to set that of the source catalog.
@@ -61,8 +69,6 @@ class ProcessShearTestTask(ProcessBaseTask):
         xKey = simCat.schema.find('x').key
         yKey = simCat.schema.find('y').key
         idKey = simCat.schema.find('ID').key
-        psfKey = simCat.schema.find('psf_index').key
-        psfFileKey = simCat.schema.find('psf_file_number').key
         nGals = imageBBox.getWidth() / self.config.galaxyStampSize
         assert nGals * self.config.galaxyStampSize == imageBBox.getWidth()
         n = imageBBox.getWidth() / nGals
@@ -71,8 +77,8 @@ class ProcessShearTestTask(ProcessBaseTask):
         for simRecord in simCat:
             sourceRecord = sourceCat.addNew()
             sourceRecord.setId(simRecord.get(idKey))
-            sourceRecord.set("psf_index", simRecord.get(psfKey))
-            sourceRecord.set("psf_file_number", simRecord.get(psfFileKey))
+            sourceRecord.set("psf_index", simRecord.get("psf_index"))
+            sourceRecord.set("psf_library", simRecord.get("psf_library"))
             position = lsst.afw.geom.Point2I(simRecord.get(xKey), simRecord.get(yKey))
             bbox = lsst.afw.geom.Box2I(position - offset, self.dims)
             footprint = lsst.afw.detection.Footprint(bbox, imageBBox)
@@ -82,39 +88,41 @@ class ProcessShearTestTask(ProcessBaseTask):
             sourceRecord.setFootprint(footprint)
         return sourceCat
 
+    #   Run a measurement algorithm on the set of sources provided by
+    #   a GalSim catalog.  Also run a centroid algorithm if one is provided
     def run(self, dataRef):
-
         exposure = self.buildExposure(dataRef)
         sourceCat = self.buildSourceCatalog(exposure.getBBox(lsst.afw.image.PARENT), dataRef)
         images_file = dataRef.get("image", immediate=True)
-
-        runCat = lsst.afw.table.SourceCatalog(self.schema)
-        runCat.addNew()
-        badcount = 0
-
+        #   the GalSim catalog will provide the number of the psf_library
+        #   and the index of the hdu with the psf for each source.
         for source in sourceCat:
-            runCat[0] = source
+            #   Locate the psb_library and get the indexed psf
             dataRef.dataId["psf_index"] = source.get("psf_index")
-            dataRef.dataId["psf_file_number"] = source.get("psf_file_number")
+            dataRef.dataId["psf_library"] = source.get("psf_library")
             psf_file = dataRef.get("psf_library", immediate=True)
-            data = psf_file.getArray().astype(numpy.float64) 
+            data = psf_file.getArray().astype(numpy.float64)
             kernel = lsst.afw.math.FixedKernel(lsst.afw.image.ImageD(data))
             psf = lsst.meas.algorithms.KernelPsf(kernel)
+            # Create a bounding box around the galaxy image of self.dims
             x = int(source.getFootprint().getCentroid().getX()+1) - (self.dims.getX()/2)
             y = int(source.getFootprint().getCentroid().getY()+1) - (self.dims.getY()/2)
             bbox = lsst.afw.geom.Box2I(lsst.afw.geom.Point2I(x,y), self.dims)
             exp = lsst.afw.image.ExposureF(exposure, bbox)
             exp.setPsf(psf)
-            #self.measurement.run(exp, runCat)
-            source.set("base_GaussianCentroid_x", source.getFootprint().getCentroid().getX())
-            source.set("base_GaussianCentroid_y", source.getFootprint().getCentroid().getY())
-            try:
-            #    self.pluginc.measure(source,exp)
-                self.plugin.measure(source,exp)
-            except:
-                badcount = badcount + 1 
+            #  Now do the measurements, calling the measure algorithms to increase speed
+            if self.centroidPlugin:
+                try:
+                    self.centroidPlugin.measure(source, exp)
+                except:
+                    self.centroidPlugin.fail(source)
+                    continue
+            if self.measPlugin:
+                try:
+                    self.measPlugin.measure(source, exp)
+                except:
+                    self.measPlugin.fail(source)
         dataRef.put(sourceCat, "src")
-        print len(sourceCat), badcount
 
     @classmethod
     def _makeArgumentParser(cls):
