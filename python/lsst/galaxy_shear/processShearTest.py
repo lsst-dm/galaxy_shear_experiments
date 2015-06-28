@@ -29,17 +29,19 @@ import lsst.afw.table
 import lsst.afw.image
 import lsst.afw.math
 import lsst.meas.algorithms
-
+import lsst.meas.base
+from lsst.meas.base.base import MeasurementError
+from lsst.meas.base.base import FATAL_EXCEPTIONS
 from lsst.obs.great3.processBase import *
 
 class ProcessShearTestConfig(ProcessBaseConfig):
     pass
-"""
-   This subclass obs.great3.ProcessBaseTask is used to call a measurement algorithm,
-   assumed to be the only algorithm which is not a Centroid algorithm, using as its
-   sources a GalSim catalog provided by the "epoch_catalog" for the dataId
-"""
+
 class ProcessShearTestTask(ProcessBaseTask):
+    """This subclass obs.great3.ProcessBaseTask is used to call a measurement algorithm,
+    assumed to be the only algorithm which is not a Centroid algorithm, using as its
+    sources a GalSim catalog provided by the "epoch_catalog" for the dataId
+    """
 
     ConfigClass = ProcessShearTestConfig
 
@@ -47,8 +49,8 @@ class ProcessShearTestTask(ProcessBaseTask):
 
     def __init__(self, **kwds):
         ProcessBaseTask.__init__(self, **kwds)
-        self.schema.addField("psf_index", type = int, doc = "index of psf within library")
-        self.schema.addField("psf_library", type = int, doc = "number of psf_libary_nn.fits")
+        self.psfIndexKey = self.schema.addField("psf_index", type = int, doc = "index of psf within library")
+        self.psfLibraryKey = self.schema.addField("psf_library", type = int, doc = "number of psf_libary_nn.fits")
         self.centroidPlugin = None
         self.measPlugin = None
         for plugin in self.measurement.plugins.keys():
@@ -57,11 +59,11 @@ class ProcessShearTestTask(ProcessBaseTask):
             else:
                 self.measPlugin = self.measurement.plugins[plugin]
 
-    #   Transfer information already know about the sources from the GalSim epoch catalog
-    #   to an afwTable catalog.  The Psf library and index in particular are needed.
     def buildSourceCatalog(self, imageBBox, dataRef):
         """Build an empty source catalog, using the provided sim catalog's position to generate
-        square Footprints and its ID to set that of the source catalog.
+        square Footprints and its ID to set that of the source catalog. Also Transfer information
+        already known about the sources from the GalSim epoch catalog to an afwTable catalog.
+        The Psf library and index in particular are needed.
         """
         sourceCat = lsst.afw.table.SourceCatalog(self.schema)
         sourceCat.getTable().setMetadata(self.algMetadata)
@@ -69,7 +71,7 @@ class ProcessShearTestTask(ProcessBaseTask):
         xKey = simCat.schema.find('x').key
         yKey = simCat.schema.find('y').key
         idKey = simCat.schema.find('ID').key
-        nGals = imageBBox.getWidth() / self.config.galaxyStampSize
+        nGals = imageBBox.getWidth() // self.config.galaxyStampSize
         assert nGals * self.config.galaxyStampSize == imageBBox.getWidth()
         n = imageBBox.getWidth() / nGals
         self.dims = lsst.afw.geom.Extent2I(n, n)
@@ -77,8 +79,8 @@ class ProcessShearTestTask(ProcessBaseTask):
         for simRecord in simCat:
             sourceRecord = sourceCat.addNew()
             sourceRecord.setId(simRecord.get(idKey))
-            sourceRecord.set("psf_index", simRecord.get("psf_index"))
-            sourceRecord.set("psf_library", simRecord.get("psf_library"))
+            sourceRecord.set(self.psfIndexKey, simRecord.get("psf_index"))
+            sourceRecord.set(self.psfLibraryKey, simRecord.get("psf_library"))
             position = lsst.afw.geom.Point2I(simRecord.get(xKey), simRecord.get(yKey))
             bbox = lsst.afw.geom.Box2I(position - offset, self.dims)
             footprint = lsst.afw.detection.Footprint(bbox, imageBBox)
@@ -88,9 +90,14 @@ class ProcessShearTestTask(ProcessBaseTask):
             sourceRecord.setFootprint(footprint)
         return sourceCat
 
-    #   Run a measurement algorithm on the set of sources provided by
-    #   a GalSim catalog.  Also run a centroid algorithm if one is provided
     def run(self, dataRef):
+        """Run a measurement algorithm on the set of sources provided by
+        a GalSim catalog.  Also run a centroid algorithm if one is provided
+        This run method has a measurement task (which makes it easier to 
+        setup the plugins and schema, but it does not actually use the measurement
+        task, instead calling the plugins directly to improve speed and remove
+        noise replacement.
+        """
         exposure = self.buildExposure(dataRef)
         sourceCat = self.buildSourceCatalog(exposure.getBBox(lsst.afw.image.PARENT), dataRef)
         images_file = dataRef.get("image", immediate=True)
@@ -111,17 +118,20 @@ class ProcessShearTestTask(ProcessBaseTask):
             exp = lsst.afw.image.ExposureF(exposure, bbox)
             exp.setPsf(psf)
             #  Now do the measurements, calling the measure algorithms to increase speed
-            if self.centroidPlugin:
-                try:
-                    self.centroidPlugin.measure(source, exp)
-                except:
-                    self.centroidPlugin.fail(source)
-                    continue
-            if self.measPlugin:
-                try:
-                    self.measPlugin.measure(source, exp)
-                except:
-                    self.measPlugin.fail(source)
+            try:
+                if self.centroidPlugin:
+                    plugin = self.centroidPlugin
+                    plugin.measure(source, exp)
+                if self.measPlugin:
+                    plugin = self.measPlugin
+                    plugin.measure(source, exp)
+            except FATAL_EXCEPTIONS:
+                raise
+            except MeasurementError as error:
+                plugin.fail(source, error)
+            except Exception as error:
+                self.log.warn("Error in %s.measure on record %s: %s"
+                              % (plugin.name, source.getId(), error))
         dataRef.put(sourceCat, "src")
 
     @classmethod
