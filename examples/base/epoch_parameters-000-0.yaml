@@ -1,0 +1,126 @@
+epoch_index: 0
+epoch_offset: &id028 !!python/tuple [0.0, 0.0]
+epoch_schema:
+- &id019 !!python/tuple [index, &id001 !!python/name:__builtin__.int '']
+- &id020 !!python/tuple [x, *id001]
+- &id021 !!python/tuple [y, *id001]
+- &id022 !!python/tuple [xshift, &id002 !!python/name:__builtin__.float '']
+- &id023 !!python/tuple [yshift, *id002]
+- &id024 !!python/tuple [xmin, *id001]
+- &id025 !!python/tuple [xmax, *id001]
+- &id026 !!python/tuple [ymin, *id001]
+- &id027 !!python/tuple [ymax, *id001]
+- &id029 !!python/tuple [g1, *id002]
+- &id030 !!python/tuple [g2, *id002]
+- &id031 !!python/tuple [mu, *id002]
+- &id032 !!python/tuple [x_field_pos, *id001]
+- &id033 !!python/tuple [y_field_pos, *id001]
+- &id034 !!python/tuple [ID, *id001]
+- &id003 !!python/tuple [bulge_n, *id002]
+- &id004 !!python/tuple [bulge_hlr, *id002]
+- &id005 !!python/tuple [bulge_q, *id002]
+- &id006 !!python/tuple [bulge_beta_radians, *id002]
+- &id007 !!python/tuple [bulge_flux, *id002]
+- &id008 !!python/tuple [disk_hlr, *id002]
+- &id009 !!python/tuple [disk_q, *id002]
+- &id010 !!python/tuple [disk_beta_radians, *id002]
+- &id011 !!python/tuple [disk_flux, *id002]
+- &id012 !!python/tuple [gal_sn, *id002]
+- &id013 !!python/tuple [cosmos_ident, *id001]
+- &id014 !!python/tuple [g1_intrinsic, *id002]
+- &id015 !!python/tuple [g2_intrinsic, *id002]
+- &id016 !!python/tuple [psf_number, *id001]
+- &id017 !!python/tuple [psf_index, *id001]
+- &id018 !!python/tuple [psf_library, *id001]
+field_index: 0
+galaxy:
+  schema:
+  - *id003
+  - *id004
+  - *id005
+  - *id006
+  - *id007
+  - *id008
+  - *id009
+  - *id010
+  - *id011
+  - *id012
+  - *id013
+  - *id014
+  - *id015
+  subfield_index: 0
+metadata: {timestamp: '2015-06-26 03:50:54.227039', user: pgee}
+noise:
+  variance: !!python/object/apply:numpy.core.multiarray.scalar
+  - !!python/object/apply:numpy.dtype
+    args: [f8, 0, 1]
+    state: !!python/tuple [3, <, null, null, null, -1, -1, 0]
+  - !!binary |
+    eBppnWhNgT8=
+noise_seed: 1618044
+psf:
+  schema:
+  - *id016
+  - *id017
+  - *id018
+seed: 13
+shear:
+  g1: !!python/object/apply:numpy.core.multiarray.scalar
+  - !!python/object/apply:numpy.dtype
+    args: [f8, 0, 1]
+    state: !!python/tuple [3, <, null, null, null, -1, -1, 0]
+  - !!binary |
+    6M2BAy9uhb8=
+  g2: !!python/object/apply:numpy.core.multiarray.scalar
+  - !!python/object/apply:numpy.dtype
+    args: [f8, 0, 1]
+    state: !!python/tuple [3, <, null, null, null, -1, -1, 0]
+  - !!binary |
+    NqJLxHhoiL8=
+  mu: 1.0
+star_schema:
+- *id019
+- *id020
+- *id021
+- *id022
+- *id023
+- *id024
+- *id025
+- *id026
+- *id027
+- *id016
+- *id017
+- *id018
+subfield_index: 0
+subfield_offset: *id028
+subfield_schema:
+- *id019
+- *id020
+- *id021
+- *id022
+- *id023
+- *id024
+- *id025
+- *id026
+- *id027
+- *id029
+- *id030
+- *id031
+- *id032
+- *id033
+- *id034
+- *id003
+- *id004
+- *id005
+- *id006
+- *id007
+- *id008
+- *id009
+- *id010
+- *id011
+- *id012
+- *id013
+- *id014
+- *id015
+xdither: 0.0
+ydither: 0.0

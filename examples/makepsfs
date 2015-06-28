@@ -1,4 +1,4 @@
 #   Trial program for testing the program to cutout Psfs from PhoSim and stuff them in a directory
 mkdir sample_psfs
-python $GALAXY_SHEAR_EXPERIMENTS_DIR/bin/cutoutPsfs.py pars image_R02_S02.fits.gz sample_psfs
-python $GALAXY_SHEAR_EXPERIMENTS_DIR/bin/packagePsfs.py sample_psfs psf.fits
+python $GALAXY_SHEAR_EXPERIMENTS_DIR/bin/cutoutPsfs.py base/pars base/base_R02_S02.fits.gz .
+python $GALAXY_SHEAR_EXPERIMENTS_DIR/bin/packagePsfs.py . psf.fits
