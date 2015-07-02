@@ -36,9 +36,10 @@ def getIndex(name, cat):
 # number of the psf before packaging.  If "PSF_NO" is not in the header,
 # the Psfs are assumed to be numbered 1, N where N is the number of psfs
 def main(args):
-    hdus = pyfits.open("%s/ground/constant/epoch_catalog-000-0.fits"%args.type)
+    epoch = args.epoch
+    hdus = pyfits.open("%s/ground/constant/epoch_catalog-%s-0.fits"%(args.type, args.epoch))
     cat = hdus[1]
-    exp = afwImage.ExposureF("%s/ground/constant/image-000-0.fits"%args.type)
+    exp = afwImage.ExposureF("%s/ground/constant/image-%s-0.fits"%(args.type, args.epoch))
     psfDict = None
     if not os.path.isdir(args.psfs):
         if not os.path.exists(args.psfs):
@@ -126,5 +127,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("type", help="Name of galaxy type (control or real_galaxy")
     parser.add_argument("psfs", help="location of psfs file or psfs dir")
+    parser.add_argument("epoch", help="3 digit epoch number")
     args = parser.parse_args()
     main(args) 

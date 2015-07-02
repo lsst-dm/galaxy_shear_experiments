@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+
 #
 # LSST Data Management System
 # Copyright 2015 AURA/LSST
@@ -20,11 +21,12 @@
 # the GNU General Public License along with this program.  If not,
 # see <http://www.lsstcorp.org/LegalNotices/>.
 #
-import pyfits
 import argparse
+import math
 import sys
 import os.path
 import numpy
+import pyfits
 
 import lsst.daf.persistence as dafPersist
 import lsst.afw.coord as afwCoord
@@ -57,59 +59,93 @@ def makeSubLibrary(images, catname, output_file, fout, psfSize=33):
     transform1 = tm.get(det.makeCameraSys(cameraGeom.PIXELS)).invert()
     transform2 = tm.get(det.makeCameraSys(cameraGeom.TAN_PIXELS))
     xytransform = afwGeom.MultiXYTransform([transform1, transform2])
-    
+
     # A centroid algorithm has to be run here, because the catalog from OpSim
     # is not very accurate
     schema = afwTable.SourceTable.makeMinimalSchema()
     control = measBase.GaussianCentroidControl()
     alg = measBase.GaussianCentroidAlgorithm
-    plugin = alg(control, "", schema)
-    
+    centroidPlugin = alg(control, "centroid", schema)
+    alg = measBase.SdssShapeAlgorithm
+    control = measBase.SdssShapeControl()
+    shapePlugin = alg(control, "shape", schema)
+
     #   Go through all the images and write out the galaxies psfNo is the line in the input
-    #   psfNo is the number of the object in the input file (1 based)
+    #   psfNo is the number of the object in the input file (0 based)
     #   psfIndex is the index of the psf's hdu in its group (0 based)
-    psfNo = 0
     psfIndex = 0
     outputHdus = pyfits.hdu.hdulist.HDUList()
+    starList = []
     for image in images:
+        identifier = image[image.find("_R")+1:image.find("_R")+8]
         exp = afwImage.ExposureF(image)
         cat = open(catname, "r")
+        psfNo = -1
         # number the psfs the same way they are listed in the catalog, starting with line 1
         # read through the OpSim catalog and create a psf for any object which is completely
         # inside the image we are processing
         for line in cat:
-            psfNo = psfNo + 1
             # catalog lines with objects have x,y position at index 2,3.  Use that for 1st guess
             attrs = line.split()
             if attrs[0] != "object": continue
-            coord = afwCoord.Coord(afwGeom.Point2D(float(attrs[2]), float(attrs[3])))
+            psfNo = psfNo + 1
+            position = afwGeom.Point2D(float(attrs[2]), float(attrs[3]))
+            coord = afwCoord.Coord(position)
             pixels = exp.getWcs().skyToPixel(coord)
             x = int(pixels.getX())
             y = int(pixels.getY())
+            starInfo = {"image":os.path.basename(image), "psfNo":psfNo, "psfIndex":-1, "pixels":pixels}
             starBBox = afwGeom.Box2I(afwGeom.Point2I(x, y), afwGeom.Extent2I(1,1))
             starBBox.grow(psfSize)
-        
+
             # test to be sure that the star is completely contained
             if exp.getBBox().contains(starBBox):
                 subImage = afwImage.ImageF(exp.getMaskedImage().getImage(), starBBox)
                 #   high SNR ratio objects with over 50,000 counts.  Crude detection
-                #   required allows a large detection threshold
+                #   required allows a large detection threshold of 100
                 ds = afwDetection.FootprintSet(subImage, afwDetection.Threshold(100))
+                #   if the detection is clean, there should be one footprint with
+                #   at least one peak.
+                footprintCnt = len(ds.getFootprints())
+                starInfo["footprintCnt"] = footprintCnt
+                if footprintCnt == 0 or footprintCnt > 1:
+                    starInfo["footprints"] = footprintCnt
+                if len(ds.getFootprints()[0].getPeaks()) == 0:
+                    starInfo["peaks"] = True
+                #   Check the peak value.  KSK indicates saturation about 100000
+                peakValue = ds.getFootprints()[0].getPeaks()[0].getPeakValue()
+                if peakValue >= 100000:
+                    starInfo["peakValue"] = peakValue
                 sources = afwTable.SourceCatalog(schema)
+                sources.defineCentroid("centroid")
+                sources.defineShape("shape")
                 record = sources.addNew()
                 record.setFootprint(ds.getFootprints()[0])
-                plugin.measure(record, exp)
-        
+                try:
+                    #   call centroid and shape to test the ellipticity
+                    #   this is a crude test at .2, just intended to cull outliers
+                    centroidPlugin.measure(record, exp)
+                    shapePlugin.measure(record, exp)
+                    shape = record.getShape()
+                    dims = afwGeom.ellipses.Ellipse(shape).getCore().computeDimensions()
+                    ellipticity = abs((dims[0]-dims[1])/dims[0])
+                    if ellipticity > .2:
+                        starInfo["ellipticity"] = ellipticity
+                except:
+                    starInfo["ellipticity"] = "NaN"
+
                 # shift the bounding box to the correct centroid
-                newCoord = exp.getWcs().pixelToSky(afwGeom.Point2D(record.get("_x"), record.get("_y")))
-                dx = int(round(record.get("_x"))) - x
-                dy = int(round(record.get("_y"))) - y
+                newCoord = exp.getWcs().pixelToSky(afwGeom.Point2D(record.get("centroid_x"), record.get("centroid_y")))
+                dx = int(round(record.get("centroid_x"))) - x
+                dy = int(round(record.get("centroid_y"))) - y
+                starInfo["centroid"] = record.getCentroid()
+                starInfo["shift_x"] = dx
+                starInfo["shift_y"] = dy
+                subImage = afwImage.ImageF(exp.getMaskedImage().getImage(), starBBox)
                 starBBox.shift(afwGeom.Extent2I(dx, dy))
-        
                 # if the exposure still contains the cutout, use it.
                 if exp.getBBox().contains(starBBox):
                     subImage = afwImage.ImageF(exp.getMaskedImage().getImage(), starBBox)
-        
                     # convert the image to 64 bits, and turn it into a Psf
                     # then warp it using the xytransform from above
                     data = subImage.getArray().astype(numpy.float64)
@@ -124,18 +160,32 @@ def makeSubLibrary(images, catname, output_file, fout, psfSize=33):
                     #  pixel scale of .2 arcsecs/pixel added for GalSim
                     hdu.header.append("GS_SCALE")
                     hdu.header.set("GS_SCALE", .2)
-                    #  psf number in input faile added in case it is needed downstream
                     hdu.header.append("PSF_NO")
-                    hdu.header.set("PSF_NO",psfNo)    # this is the 1 based number of the psf
-                    
+                    hdu.header.set("PSF_NO", psfNo)
+                    #  psf number in input file added in case it is needed downstream
                     outputHdus.append(hdu)
-                    fout.write("%s %d %d\n"%(os.path.basename(output_file), psfIndex, psfNo))
+                    starInfo["psfIndex"] = psfIndex
+                    starInfo["bbox"] = starBBox
                     psfIndex = psfIndex + 1
+                #   otherwise, mark as an edge case
+                else:
+                    starInfo["edge"] = True
+                starList.append(starInfo)
         cat.close()
         del hdu
         del exp
+    #   Now go through all the starInfos and delete any the might intersect
+    for info in starList:
+        for info2 in starList:
+                if not info["psfNo"] == info2["psfNo"] and info["image"] == info2["image"]:
+                    d = math.sqrt(info["pixels"].distanceSquared(info2["pixels"]))
+                    if d < 50:
+                        if not "overlap" in info.keys() or info["overlap"] > d:
+                            info["overlap"] = str(d)
+
     outputHdus.writeto(output_file, clobber=True)
-    print len(outputHdus), " psf images were cutout from the original images and written to", output_file 
+    print len(outputHdus), " psf images were cutout from the original images and written to", output_file
+    return starList
 
 #   This main program creates a library for each raft in the input_directory.  A raft is assumed
 #   to be comprised of 9 files named basename_Rnn_Smm.fits in the input directory
@@ -182,10 +232,11 @@ if __name__ == "__main__":
     if not os.path.isdir(baseDir):
         os.mkdir(baseDir)
     fout = open(os.path.join(baseDir, "psfs.index"), "w")
+    ferr = open(os.path.join(baseDir, "psfs.errors"), "w")
     for raft in rafts:
         images = []
         #   From phosim, the files are typically names base_Rnn_Smm.fits.gz
-        #   where base is an identifier name we supply from our PhoSim runs 
+        #   where base is an identifier name we supply from our PhoSim runs
         for file in os.listdir(args.input_dir):
             if file.find(args.basename + "_" + raft) >= 0:
                 if args.filter == None or file.find(args.filter) >= 0:
@@ -196,5 +247,24 @@ if __name__ == "__main__":
         output_file = os.path.join(baseDir, "psf_library_" + raft[1:3] + ".fits")
         #   If there are any images for this raft, cutout the Psfs and place in a mini-library
         if len(images) > 0:
-            makeSubLibrary(images, catname, output_file, fout, psfSize=args.psf_size)
+            starInfo = makeSubLibrary(images, catname, output_file, fout, psfSize=args.psf_size)
+            #   if none of the errors are indicated, it is Ok to write this one to the output file
+            #   dump all the errors to the error file
+            for info in starInfo:
+                nErrors = 0
+                for flag in ("overlap", "footprints", "peakValue", "peaks", "edge", "ellipticity"):
+                    if flag in info.keys():
+                        if nErrors == 0:
+                            ferr.write("psfNo: %d"%info["psfNo"])
+                        ferr.write(" ")
+                        ferr.write(" %s=%s"%(flag, str(info[flag])))
+                        nErrors = nErrors + 1
+                if nErrors > 0:
+                    ferr.write("\n")
+                    ferr.flush()
+                else:
+                    fout.write("%s %s %d %d (%d,%d)"%(info["image"], raft, info["psfNo"], info["psfIndex"],
+                                info["pixels"].getX(), info["pixels"].getY()))
+                    fout.write("\n")
     fout.close()
+    ferr.close()
