@@ -21,6 +21,7 @@
 # see <http://www.lsstcorp.org/LegalNotices/>.
 #
 
+import math
 import numpy
 import lsst.daf.base
 import lsst.pex.config
@@ -51,13 +52,11 @@ class ProcessShearTestTask(ProcessBaseTask):
         ProcessBaseTask.__init__(self, **kwds)
         self.psfIndexKey = self.schema.addField("psf_index", type = int, doc = "index of psf within library")
         self.psfLibraryKey = self.schema.addField("psf_library", type = int, doc = "number of psf_libary_nn.fits")
-        self.centroidPlugin = None
-        self.measPlugin = None
-        for plugin in self.measurement.plugins.keys():
-            if plugin.find("Centroid") > 0:
-                self.centroidPlugin = self.measurement.plugins[plugin]
-            else:
-                self.measPlugin = self.measurement.plugins[plugin]
+        self.e1OutKey = self.schema.addField("e1", type = float, doc = "measured e1 value")
+        self.e2OutKey = self.schema.addField("e2", type = float, doc = "measured e2 value")
+        self.outSigmaKey = self.schema.addField("e_sigma", type = float, doc = "measuree e sigma")
+        self.g1Key = self.schema.addField("g1", type = float, doc = "GalSim constant g1 value")
+        self.g2Key = self.schema.addField("g2", type = float, doc = "GalSim constant g2 value")
 
     def buildSourceCatalog(self, imageBBox, dataRef):
         """Build an empty source catalog, using the provided sim catalog's position to generate
@@ -66,6 +65,27 @@ class ProcessShearTestTask(ProcessBaseTask):
         The Psf library and index in particular are needed.
         """
         sourceCat = lsst.afw.table.SourceCatalog(self.schema)
+        measPlugin = self.measurement.plugins.keys()[-1]
+        fieldNames = self.schema.extract(measPlugin + "*").keys()
+        self.e1Key = None
+        self.e2Key = None
+        self.sigmaKey = None
+        self.xxKey = None
+        self.yyKey = None
+        self.xyKey = None
+        for name in fieldNames:
+            if name.endswith("_e1"):
+                self.e1Key = self.schema.find(name).getKey()
+            if name.endswith("_e2"):
+                self.e2Key = self.schema.find(name).getKey()
+            if name.endswith("_sigma"):
+                self.sigmaKey = self.schema.find(name).getKey()
+            if name.endswith("_xx"):
+                self.xxKey = self.schema.find(name).getKey()
+            if name.endswith("_yy"):
+                self.yyKey = self.schema.find(name).getKey()
+            if name.endswith("_xy"):
+                self.xyKey = self.schema.find(name).getKey()
         sourceCat.getTable().setMetadata(self.algMetadata)
         simCat = dataRef.get("epoch_catalog", immediate=True)
         xKey = simCat.schema.find('x').key
@@ -81,6 +101,8 @@ class ProcessShearTestTask(ProcessBaseTask):
             sourceRecord.setId(simRecord.get(idKey))
             sourceRecord.set(self.psfIndexKey, simRecord.get("psf_index"))
             sourceRecord.set(self.psfLibraryKey, simRecord.get("psf_library"))
+            sourceRecord.set(self.g1Key, simRecord.get("g1"))
+            sourceRecord.set(self.g2Key, simRecord.get("g2"))
             position = lsst.afw.geom.Point2I(simRecord.get(xKey), simRecord.get(yKey))
             bbox = lsst.afw.geom.Box2I(position - offset, self.dims)
             footprint = lsst.afw.detection.Footprint(bbox, imageBBox)
@@ -103,6 +125,14 @@ class ProcessShearTestTask(ProcessBaseTask):
         images_file = dataRef.get("image", immediate=True)
         #   the GalSim catalog will provide the number of the psf_library
         #   and the index of the hdu with the psf for each source.
+        count = 0
+        e1_sum = 0.0
+        e2_sum = 0.0
+        weight_sum = 0.0
+        if len(sourceCat) > 0:
+            g1 = sourceCat[0].get(self.g1Key)
+            g2 = sourceCat[0].get(self.g2Key)
+
         for source in sourceCat:
             #   Locate the psb_library and get the indexed psf
             dataRef.dataId["psf_index"] = source.get("psf_index")
@@ -117,22 +147,63 @@ class ProcessShearTestTask(ProcessBaseTask):
             bbox = lsst.afw.geom.Box2I(lsst.afw.geom.Point2I(x,y), self.dims)
             exp = lsst.afw.image.ExposureF(exposure, bbox)
             exp.setPsf(psf)
+            CD = numpy.array([[5.55E-5, 0.0], [0.0, 5.55E-5]])
+            crpix = lsst.afw.geom.Point2D(0.0,0.0)
+            crval = lsst.afw.geom.Point2D(0.0,0.0)
+            exp.setWcs(lsst.afw.image.Wcs(crval, crpix, CD))
+            calib = lsst.afw.image.Calib()
+            calib.setFluxMag0((3531360874589.57, 21671681149.139))
+            exp.setCalib(calib)
             #  Now do the measurements, calling the measure algorithms to increase speed
+            sigma = 0 
             try:
-                if self.centroidPlugin:
-                    plugin = self.centroidPlugin
-                    plugin.measure(source, exp)
-                if self.measPlugin:
-                    plugin = self.measPlugin
-                    plugin.measure(source, exp)
+                for plugin in self.measurement.plugins.keys():
+                    self.measurement.plugins[plugin].measure(source, exp)
+                if self.e1Key != None:
+                    e1 = source.get(self.e1Key)
+                    e2 = source.get(self.e2Key)
+                if self.sigmaKey != None:
+                    sigma = source.get(self.sigmaKey)
+
+                if self.xxKey != None:
+                    xx = source.get(self.xxKey)
+                    yy = source.get(self.yyKey)
+                    xy = source.get(self.xyKey)
+                    e1 = (xx - yy) / (xx + yy)
+                    e2 = 2 * xy / (xx + yy)
+
+                e = math.sqrt(e1 * e1 + e2 * e2)
+                q = math.sqrt((1+e)/(1-e))
+                g1 = source.get(self.g1Key)
+                g2 = source.get(self.g2Key)
+                g1 = source.get(self.g1Key)
+                g2 = source.get(self.g2Key)
+                theta = 180.0 * math.atan(e2/e1)/(2.0*math.pi)
+                if sigma != None:
+                    weight = 1.0/(.25*.25 + sigma*sigma)
+                else:
+                    weight = 1.0
+                if not e1 >= 0 and not e1 <= 0:
+                    continue
+                source.set(self.e1OutKey, e1)
+                source.set(self.e2OutKey, e2)
+                source.set(self.outSigmaKey, sigma)
+                weight_sum = weight_sum + weight
+                e1_sum = e1_sum + (e1 * weight)
+                e2_sum = e2_sum + (e2 * weight)
+                count = count + 1
+              
             except FATAL_EXCEPTIONS:
                 raise
             except MeasurementError as error:
-                plugin.fail(source, error)
+                self.measurement.plugins[plugin].fail(source, error)
             except Exception as error:
                 self.log.warn("Error in %s.measure on record %s: %s"
-                              % (plugin.name, source.getId(), error))
+                              % (self.measurement.plugins[plugin].name, source.getId(), error))
         dataRef.put(sourceCat, "src")
+        print dataRef.dataId, "Processed %d records successfully out of %d"%(count, len(sourceCat)) 
+        print "e1_sum = %.5f, e2_sum = %.5f, weight_sum = %.5f, count = %d"%(e1_sum, e2_sum, weight_sum, count) 
+        print "Weighted averages: e1 = %.5f, e2 = %.5f, with g1 = %.5f, g2 = %.5f"%(e1_sum/weight_sum, e2_sum/weight_sum, g1, g2)
 
     @classmethod
     def _makeArgumentParser(cls):
