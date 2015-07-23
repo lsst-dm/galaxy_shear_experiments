@@ -50,11 +50,10 @@ class ProcessShearTestTask(ProcessBaseTask):
 
     def __init__(self, **kwds):
         ProcessBaseTask.__init__(self, **kwds)
+        self.psfLibraryKey = self.schema.addField("psf_library", type = int, doc = "number of psf library")
         self.psfIndexKey = self.schema.addField("psf_index", type = int, doc = "index of psf within library")
-        self.psfLibraryKey = self.schema.addField("psf_library", type = int, doc = "number of psf_libary_nn.fits")
-        self.e1OutKey = self.schema.addField("e1", type = float, doc = "measured e1 value")
-        self.e2OutKey = self.schema.addField("e2", type = float, doc = "measured e2 value")
-        self.outSigmaKey = self.schema.addField("e_sigma", type = float, doc = "measuree e sigma")
+        self.psfNumberKey = self.schema.addField("psf_number", type = int, doc = "number of psf_nnnn.fits")
+
         self.g1Key = self.schema.addField("g1", type = float, doc = "GalSim constant g1 value")
         self.g2Key = self.schema.addField("g2", type = float, doc = "GalSim constant g2 value")
 
@@ -101,6 +100,7 @@ class ProcessShearTestTask(ProcessBaseTask):
             sourceRecord.setId(simRecord.get(idKey))
             sourceRecord.set(self.psfIndexKey, simRecord.get("psf_index"))
             sourceRecord.set(self.psfLibraryKey, simRecord.get("psf_library"))
+            sourceRecord.set(self.psfNumberKey, simRecord.get("psf_number"))
             sourceRecord.set(self.g1Key, simRecord.get("g1"))
             sourceRecord.set(self.g2Key, simRecord.get("g2"))
             position = lsst.afw.geom.Point2I(simRecord.get(xKey), simRecord.get(yKey))
@@ -137,7 +137,13 @@ class ProcessShearTestTask(ProcessBaseTask):
             #   Locate the psb_library and get the indexed psf
             dataRef.dataId["psf_index"] = source.get("psf_index")
             dataRef.dataId["psf_library"] = source.get("psf_library")
-            psf_file = dataRef.get("psf_library", immediate=True)
+            dataRef.dataId["psf_number"] = source.get("psf_number")
+            if dataRef.datasetExists("psf_file"):
+                psf_file = dataRef.get("psf_file", immediate=True)
+            else:
+                print "loading Library %d, for psfnumber %d"%(source.get("psf_library"), source.get("psf_number"))
+
+                psf_file = dataRef.get("psf_library", immediate=True)
             data = psf_file.getArray().astype(numpy.float64)
             kernel = lsst.afw.math.FixedKernel(lsst.afw.image.ImageD(data))
             psf = lsst.meas.algorithms.KernelPsf(kernel)
@@ -155,44 +161,10 @@ class ProcessShearTestTask(ProcessBaseTask):
             calib.setFluxMag0((3531360874589.57, 21671681149.139))
             exp.setCalib(calib)
             #  Now do the measurements, calling the measure algorithms to increase speed
-            sigma = 0 
+            sigma = None 
             try:
                 for plugin in self.measurement.plugins.keys():
                     self.measurement.plugins[plugin].measure(source, exp)
-                if self.e1Key != None:
-                    e1 = source.get(self.e1Key)
-                    e2 = source.get(self.e2Key)
-                if self.sigmaKey != None:
-                    sigma = source.get(self.sigmaKey)
-
-                if self.xxKey != None:
-                    xx = source.get(self.xxKey)
-                    yy = source.get(self.yyKey)
-                    xy = source.get(self.xyKey)
-                    e1 = (xx - yy) / (xx + yy)
-                    e2 = 2 * xy / (xx + yy)
-
-                e = math.sqrt(e1 * e1 + e2 * e2)
-                q = math.sqrt((1+e)/(1-e))
-                g1 = source.get(self.g1Key)
-                g2 = source.get(self.g2Key)
-                g1 = source.get(self.g1Key)
-                g2 = source.get(self.g2Key)
-                theta = 180.0 * math.atan(e2/e1)/(2.0*math.pi)
-                if sigma != None:
-                    weight = 1.0/(.25*.25 + sigma*sigma)
-                else:
-                    weight = 1.0
-                if not e1 >= 0 and not e1 <= 0:
-                    continue
-                source.set(self.e1OutKey, e1)
-                source.set(self.e2OutKey, e2)
-                source.set(self.outSigmaKey, sigma)
-                weight_sum = weight_sum + weight
-                e1_sum = e1_sum + (e1 * weight)
-                e2_sum = e2_sum + (e2 * weight)
-                count = count + 1
-              
             except FATAL_EXCEPTIONS:
                 raise
             except MeasurementError as error:
@@ -201,9 +173,6 @@ class ProcessShearTestTask(ProcessBaseTask):
                 self.log.warn("Error in %s.measure on record %s: %s"
                               % (self.measurement.plugins[plugin].name, source.getId(), error))
         dataRef.put(sourceCat, "src")
-        print dataRef.dataId, "Processed %d records successfully out of %d"%(count, len(sourceCat)) 
-        print "e1_sum = %.5f, e2_sum = %.5f, weight_sum = %.5f, count = %d"%(e1_sum, e2_sum, weight_sum, count) 
-        print "Weighted averages: e1 = %.5f, e2 = %.5f, with g1 = %.5f, g2 = %.5f"%(e1_sum/weight_sum, e2_sum/weight_sum, g1, g2)
 
     @classmethod
     def _makeArgumentParser(cls):
