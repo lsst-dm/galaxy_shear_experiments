@@ -40,18 +40,19 @@ import lsst.meas.algorithms as measAlg
 import lsst.meas.base as measBase
 
 """
-checkPar.py is a python program which can be called as a command line script.
-It is used to test the distribution of a library over the entire
+checkPars.py is a python program which can be called as a command line script.
+It is used to print the distribution of a library over the entire
 LSST focal plane, divided into groups (currently by raft)
 """
 
 #   This routine takes a list of images and a catalog name (presumably covering the
 #   same area as the images.  Any entry in the catalog whose center is contained in
-#   the bounding rectangle of a given image is counted as belonging both to the
-#   raft and the sensor of the image
+#   the bounding rectangle of a given image is counted as belonging to the h
+#   raft and the sensor of the image.
 def getRaftStatistics(images, catname, raft):
     imageinfo = []
-    #   Go through all the images and see how many sources each contains
+    #   First create a list of "imageinfo" entries which know the position
+    #   and bounding box of each raft, sensor.
     for i, image in enumerate(images):
         exp = afwImage.ExposureF(image)
         width, height = exp.getMaskedImage().getImage().getArray().shape
@@ -69,6 +70,7 @@ def getRaftStatistics(images, catname, raft):
             temp = decmin
             decmin = decmax
             decmax = temp
+        # Get the raft and sensor values from the imagename.  
         ind = image.find("_R")
         raft = image[ind+1:ind+5]
         ind = image.find("_S")
@@ -76,8 +78,8 @@ def getRaftStatistics(images, catname, raft):
         imageinfo.append((raft, sensor, ramin, ramax, decmin, decmax))
     #   hist is a counting array, one entry per image
     hist = numpy.zeros(len(images), dtype = int)
-    # read through the OpSim catalog and count which raft, sensor it is in
-    # inside the image we are processing
+
+    # read through the OpSim catalog and count how many are in each raft, sensor
     cat = open(catname, "r")
     for line in cat:
         # catalog lines with objects have x,y position at index 2,3.  Use that for 1st guess
@@ -135,7 +137,7 @@ if __name__ == "__main__":
                 if not entry in rafts:
                     rafts.append(entry)
     total = 0
-    #   Now process the images raft-by-raft
+    #   Now process the images raft-by-raft and print 
     for raft in rafts:
         images = []
         #   From phosim, the files are typically names basename_Rnn_Smm.fits.gz
@@ -153,6 +155,8 @@ if __name__ == "__main__":
         if not os.path.isfile(catname):
             print catname, " also not found.  exiting..."
             sys.exit(1)
+
+        #   Now print a histogram of how many catalog objects are in each image
         if len(images) > 0:
             total = total + getRaftStatistics(images, catname, raft)
     print "Total = ", total
