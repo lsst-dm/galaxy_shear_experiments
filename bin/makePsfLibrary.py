@@ -49,7 +49,7 @@ LSST focal plane, divided into groups (currently by raft)
 #   same area as the images.  Any entry in the catalog which is fully contained in an
 #   image is cutout, transformed to the center of the pupil, and then placed in a libray
 #   (multi-extension fits file).  The entry is also logged to an open file handle, fout
-def makeSubLibrary(images, catname, output_file, fout, psfSize=33):
+def makeSubLibrary(images, catname, output_file, fout, psfSize=33, satValue=None):
     # Create an XYTransform from TanPixels to Pixels.  This is the transform
     # needed to remove the optical distortion from the Psf. Use R22_S11 as center
     butler = dafPersist.Butler(root=os.path.join(os.path.dirname(__file__), "."))
@@ -112,9 +112,9 @@ def makeSubLibrary(images, catname, output_file, fout, psfSize=33):
                     starInfo["footprints"] = footprintCnt
                 if len(ds.getFootprints()[0].getPeaks()) == 0:
                     starInfo["peaks"] = True
-                #   Check the peak value.  KSK indicates saturation about 100000
+                #   Check the peak value if satValue is set
                 peakValue = ds.getFootprints()[0].getPeaks()[0].getPeakValue()
-                if peakValue >= 100000:
+                if not satValue is None and peakValue >= satValue:
                     starInfo["peakValue"] = peakValue
                 sources = afwTable.SourceCatalog(schema)
                 sources.defineCentroid("centroid")
@@ -156,7 +156,12 @@ def makeSubLibrary(images, catname, output_file, fout, psfSize=33):
                         hdu = pyfits.hdu.image.PrimaryHDU()
                     else:
                         hdu = pyfits.hdu.image.ImageHDU()
-                    hdu.data = warpedPsf.computeImage().getArray()
+                    try:
+                        hdu.data = warpedPsf.computeImage().getArray()
+                    except:
+                        starInfo["computeImage"] = True
+                        starList.append(starInfo)
+                        continue
                     #  pixel scale of .2 arcsecs/pixel added for GalSim
                     hdu.header.append("GS_SCALE")
                     hdu.header.set("GS_SCALE", .2)
@@ -211,9 +216,10 @@ if __name__ == "__main__":
     parser.add_argument("input_dir", help="Name of the input dir containing the images")
 
     parser.add_argument("basename", help="The opthistid provided to PhoSim")
-    parser.add_argument("output_dir", help="Name of the output directory")
-    parser.add_argument("-s", "--psf_size", help="Size of psf images to be cutout", type = int, default=33)
-    parser.add_argument("-f", "--filter", help="Use only images containing this string", default=None)
+    parser.add_argument("-o", "--output_dir", help="Name of the output directory", default=None)
+    parser.add_argument("-p", "--psf_size", help="Size of psf images to be cutout", type = int, default=33)
+    parser.add_argument("-s", "--sat_value", help="saturation value for input images", type = int, default=None)
+    parser.add_argument("-i", "--include", help="Use only images containing this string", default=None)
     args = parser.parse_args()
     #   Collect a list of available rafts
     #   The current convention is the output from phosim, which sends us files which
@@ -227,8 +233,13 @@ if __name__ == "__main__":
                 entry = file[raftIndex+1 : raftIndex+4]
                 if not entry in rafts:
                     rafts.append(entry)
+    print len(rafts), "rafts found"
+    print rafts
     #   Now process the Psfs raft-by-raft
     baseDir = args.output_dir
+    if baseDir is None:
+        baseDir = os.path.join(args.input_dir, "psfs")
+
     if not os.path.isdir(baseDir):
         os.mkdir(baseDir)
     fout = open(os.path.join(baseDir, "psfs.index"), "w")
@@ -239,7 +250,7 @@ if __name__ == "__main__":
         #   where base is an identifier name we supply from our PhoSim runs
         for file in os.listdir(args.input_dir):
             if file.find(args.basename + "_" + raft) >= 0:
-                if args.filter == None or file.find(args.filter) >= 0:
+                if args.include == None or len(args.include) == 0 or file.find(args.include) >= 0:
                     imagename = os.path.join(args.input_dir, file)
                     if os.path.isfile(imagename) and not imagename in images:
                         images.append(imagename)
@@ -247,12 +258,12 @@ if __name__ == "__main__":
         output_file = os.path.join(baseDir, "psf_library_" + raft[1:3] + ".fits")
         #   If there are any images for this raft, cutout the Psfs and place in a mini-library
         if len(images) > 0:
-            starInfo = makeSubLibrary(images, catname, output_file, fout, psfSize=args.psf_size)
+            starInfo = makeSubLibrary(images, catname, output_file, fout, psfSize=args.psf_size, satValue=args.sat_value)
             #   if none of the errors are indicated, it is Ok to write this one to the output file
             #   dump all the errors to the error file
             for info in starInfo:
                 nErrors = 0
-                for flag in ("overlap", "footprints", "peakValue", "peaks", "edge", "ellipticity"):
+                for flag in ("overlap", "footprints", "peakValue", "peaks", "edge", "ellipticity", "computeImage"):
                     if flag in info.keys():
                         if nErrors == 0:
                             ferr.write("psfNo: %d"%info["psfNo"])
@@ -263,8 +274,12 @@ if __name__ == "__main__":
                     ferr.write("\n")
                     ferr.flush()
                 else:
-                    fout.write("%s %s %d %d (%d,%d)"%(info["image"], raft, info["psfNo"], info["psfIndex"],
+                    print "library: ", raft, info["psfNo"]
+                    fout.write("%s %s %d %d (%d,%d)"%(os.path.basename(output_file), raft,
+                               info["psfNo"], info["psfIndex"],
                                 info["pixels"].getX(), info["pixels"].getY()))
                     fout.write("\n")
+        else:
+            print raft, " no images coincided" 
     fout.close()
     ferr.close()
