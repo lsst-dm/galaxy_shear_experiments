@@ -47,7 +47,7 @@ LSST focal plane, divided into groups (currently by raft)
 
 #   This routine takes a list of images and a catalog name (presumably covering the
 #   same area as the images.  Any entry in the catalog whose center is contained in
-#   the bounding rectangle of a given image is counted as belonging to the h
+#   the bounding rectangle of a given image is counted as belonging to the
 #   raft and the sensor of the image.
 def getRaftStatistics(images, catname, raft):
     imageinfo = []
@@ -79,7 +79,7 @@ def getRaftStatistics(images, catname, raft):
     #   hist is a counting array, one entry per image
     hist = numpy.zeros(len(images), dtype = int)
 
-    # read through the OpSim catalog and count how many are in each raft, sensor
+    # read through the PhoSim catalog and count how many are in each raft, sensor
     cat = open(catname, "r")
     for line in cat:
         # catalog lines with objects have x,y position at index 2,3.  Use that for 1st guess

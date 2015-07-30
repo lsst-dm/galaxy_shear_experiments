@@ -35,7 +35,7 @@ logging.basicConfig(filename='log_generate_star_grid_instance_catalog.log',
 ###########################################################
 def gen_star_list(outfilename, type, fov, ra_cen, dec_cen, nstars_per_dim, seeing, filter, seed, histid):
 	sed_filename = "../sky/sed_flat.txt"
-        nstars = nstars_per_dim * nstars_per_dim
+        nstars = nstars_per_dim*nstars_per_dim
 	### Pointing from simGridStars in ImageSimulationRecipes
 
         # add a correction for the fact that ra coordinates are smaller
@@ -58,7 +58,7 @@ def gen_star_list(outfilename, type, fov, ra_cen, dec_cen, nstars_per_dim, seein
 	### Coordinate ranges (degrees)
 	###  Space stars 1 arcminute apart
         elif type == "grid":
-	    grid_radius = np.min(((nstars_per_dim / 60.) / 2., fov/2.))
+	    grid_radius = np.min(((nstars_per_dim/60.)/2., fov/2.))
 	    ra_min = ra_cen - (fov/2.0/raCorr)
 	    ra_max = ra_cen + (fov/2.0/raCorr)
 	    dec_min = dec_cen - fov/2.0
@@ -89,13 +89,11 @@ def gen_star_list(outfilename, type, fov, ra_cen, dec_cen, nstars_per_dim, seein
 
 	### Write header of instance catalog file with observing and simulation parameters
         outfile = open(outfilename, "w")
-	print >> outfile, 'Unrefracted_RA', ra_cen
-	print >> outfile, 'Unrefracted_Dec', dec_cen
 	print >> outfile, 'Opsim_obshistid %d'%histid
 	print >> outfile, 'SIM_SEED %d'%seed
 	print >> outfile, 'SIM_EXPTIME 30.0'
-	print >> outfile, 'Unrefracted_RA 81.1760879'
-	print >> outfile, 'Unrefracted_Dec -12.2103036'
+	print >> outfile, 'Unrefracted_RA', ra_cen
+	print >> outfile, 'Unrefracted_Dec', dec_cen
 	print >> outfile, 'Opsim_moonra 313.898938'
 	print >> outfile, 'Opsim_moondec -12.7605726'
 	print >> outfile, 'Opsim_rotskypos 184.222551'
