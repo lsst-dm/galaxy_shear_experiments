@@ -1,0 +1,28 @@
+#  Parameters used by the shear analysis test scripts
+output_dir control/ground/constant
+
+#  These are used to manage to location and origin of the psfs
+psf_size 33
+filter 2
+seeing 0.8
+psf_dir sample_psfs/psfs
+
+#  Settings for great3sims galaxy generation
+n_subfields 1
+n_epochs 1
+ndims 10
+fov 1.500000
+galaxy_stamp_size 48
+shear_value 0.02
+shear_angle 15.0
+gal_dir /sandbox/lsstshared/pgee/mylsst9/COSMOS_23.5_training_sample
+
+#  Settings for analysis code (the alogrithm itself is in processShearTest.py)
+#  The shape field can be either an ellipticity measurement or a moments
+#  The field name provided is the name minus either an _e1/e2 or _xx/xy/yy
+#  The sigma field is usually and error in the ellipticity measurement.
+#  If sigma is estimated from another measurement, sigma_signal_field is required
+shape_field ext_shapeHSM_HsmShapeRegauss
+shape_type ellipticity
+sigma_field ext_shapeHSM_HsmShapeRegauss_sigma
+

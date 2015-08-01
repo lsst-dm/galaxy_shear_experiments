@@ -1,0 +1,3 @@
+#!/usr/bin/tcsh
+# Script to plot from an analysis fits output
+python $GALAXY_SHEAR_EXPERIMENTS_DIR/bin/plotShearTest.py sample_anal/anal.cat.fits --seeing=0.7 --filter 2

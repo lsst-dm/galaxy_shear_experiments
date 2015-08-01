@@ -1,0 +1,21 @@
+#!/bin/bash
+base=$1
+if [ "$2" = "" ]; then 
+    procs=12
+else
+    procs=$2
+fi
+echo "Running directory $base with $procs processes"
+
+outdir=`grep output_dir $base/run_params | sed -e 's/.* //'`
+size=`grep galaxy_stamp_size $base/run_params | sed -e 's/.* //'`
+n_subfields=`grep n_subfields $base/run_params | sed -e 's/.* //'`
+n_epochs=`grep n_epochs $base/run_params | sed -e 's/.* //'`
+let n1=n_subfields-1
+let n2=n_epochs-1
+date
+echo "lsst.obs.great3.Great3Mapper" > ${base}/${outdir}/_mapper
+cat processShearTest.py > temp.py
+echo "root.galaxyStampSize = $size" >> temp.py 
+python $GALAXY_SHEAR_EXPERIMENTS_DIR/bin/processShearTest.py $base/$outdir -j $procs --configfile=temp.py --id subfield=0..$n1 epoch=0..$n2 --output $base/$outdir
+date

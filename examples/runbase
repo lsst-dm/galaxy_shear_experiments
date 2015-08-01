@@ -1,0 +1,7 @@
+#!/usr/bin/tcsh
+mkdir base
+cp run_params base
+./runGreat base
+./runGal base
+./runMeas base
+./runAnal base base/analysis_catalog
