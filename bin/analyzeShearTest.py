@@ -20,12 +20,7 @@
 # the GNU General Public License along with this program.  If not,
 # see <http://www.lsstcorp.org/LegalNotices/>.
 #
-import argparse
-import math
-import os.path
 
-import lsst.daf.persistence as dafPersist
-import lsst.afw.table as afwTable
 """
 analyzeShearTest is a portion of the shear test suite which summarizes the information
 from all of the GalSim runs and creates a table which is suitable for plotting.
@@ -39,6 +34,14 @@ for each subfield, comprised of 512 galaxy pair rotated at 90 degrees to each ot
 These 32 samples are averaged to provide an overall estimator of the shear, and the stddev of
 these samples provides an error for this estimator.
 """
+
+import argparse
+import math
+import os.path
+
+import lsst.daf.persistence as dafPersist
+import lsst.afw.table as afwTable
+
 def getCatalog(catName):
     #  This routine processes one run at a time, and appends to an existing catalog.
     if os.path.exists(catName):
@@ -46,18 +49,18 @@ def getCatalog(catName):
     else:
     #   if the catalog has not been created yet, create an empy one with the right schema.
         schema = afwTable.Schema()
-        schema.addField("filter", type = int, doc = "")
-        schema.addField("seeing", type = float, doc = "")
-        schema.addField("shear", type = float, doc = "")
-        schema.addField("nsub", type = int, doc = "")
-        schema.addField("nsource", type = int, doc = "")
-        schema.addField("g", type = float, doc = "")
-        schema.addField("eAvg", type = float, doc = "")
-        schema.addField("eStd", type = float, doc = "")
-        schema.addField("e1Dev", type = float, doc = "")
-        schema.addField("e1Std", type = float, doc = "")
-        schema.addField("e2Dev", type = float, doc = "")
-        schema.addField("e2Std", type = float, doc = "")
+        schema.addField("filter", type = int, doc = "filter 2 or 3 used in PhoSim psf generator.")
+        schema.addField("seeing", type = float, doc = "raw seeing used by PhoSim.")
+        schema.addField("shear", type = float, doc = "constant shear level used in the GalSim run.")
+        schema.addField("nsub", type = int, doc = "number of subfields in this run")
+        schema.addField("nsource", type = int, doc = "total number of galaxies in this run")
+        schema.addField("g", type = float, doc = "g value calcuted from GalSim g1 and g2")
+        schema.addField("eAvg", type = float, doc = "average e for the nsub subfields in this run")
+        schema.addField("eStd", type = float, doc = "stddev of the average e values")
+        schema.addField("e1Dev", type = float, doc = "e1 deviation from mean, for nsub subfields.")
+        schema.addField("e1Std", type = float, doc = "stddev of the e1 deviation")
+        schema.addField("e2Dev", type = float, doc = "e2 deviation from mean, for nsub subfields")
+        schema.addField("e2Std", type = float, doc = "stddev of the e2 deviation")
         outCat = afwTable.BaseCatalog(schema)
     return outCat
 
@@ -110,11 +113,10 @@ if __name__ == "__main__":
     galaxy_stamp_size = int(params["galaxy_stamp_size"])
     output_dir = params["output_dir"]
 
-    #   This tells us the algorithm fields we need to extract the ellipticity and error
     #   The shape type can be "moments" or "ellipticity"
-    #   The error can be extracted from an ellipticity error field or based on the
-    #   signal-to-noise of some other field such as flux and flux error.  In that
-    #   case, the weighting value used is shape_field/(sigma_field/sigma_signal_field)
+    #   If we done have an e_sigma, the signal field  tells us to extract the weighting function
+    #   from the SNR of some other field, where the sigma will be the error, and the
+    #   The sigma used for weighting is shape_field/(sigma_field/sigma_signal_field)
     if "shape_field" in params.keys():
         shape_field = params["shape_field"] + "_"
         shape_type = params["shape_type"]
@@ -173,7 +175,7 @@ if __name__ == "__main__":
                 sigmaSignalKey = None
             else:
                 sigmaKey = sourceCat.getSchema().find(sigma_field).getKey()
-                if sigma_signal_field == None:
+                if not sigma_signal_field is None:
                     sigmaSignalKey = None
                 else:
                     sigmaSignalKey = sourceCat.getSchema().find(sigma_signal_field).getKey()
@@ -239,7 +241,7 @@ if __name__ == "__main__":
         eStddev = math.sqrt( (nAvgs * eSumSq - eSum * eSum)/(nAvgs * (nAvgs - 1)))
         e1Stddev = math.sqrt((nAvgs * e1DevSumSq - e1DevSum * e1DevSum)/(nAvgs * (nAvgs - 1)))
         e2Stddev = math.sqrt((nAvgs * e2DevSumSq - e2DevSum * e2DevSum)/(nAvgs * (nAvgs - 1)))
-        print "%d subfields: e = %.4f +- %.4f, e1 = %.4f +- %.4f, e2 = %.4f +- %.4f, g = %.3f %.3f"%(nAvgs,
+        print "%d subfields: e=%.4f +-%.4f, e1=%.4f +-%.4f, e2=%.4f +-%.4f, g=%.3f %.3f"%(nAvgs,
                eSum/nAvgs, eStddev, e1DevSum/nAvgs, e1Stddev, e2DevSum/nAvgs, e2Stddev,
                math.sqrt(g1*g1 + g2*g2), thetaSum)
         #   And append to the output fits file
@@ -257,7 +259,7 @@ if __name__ == "__main__":
         outrec.set(e2DevKey, e2DevSum/nAvgs)
         outrec.set(e2StdKey, e2Stddev)
     else:
-        print "Not enough subfields to calculate and error.  Not added to catalog"
+        print "Not enough subfields to calculate error.  Subfield not added to catalog"
         print "%d subfields: e = %.4f, e1 = %.4f, e2 = %.4f, g = %.3f"%(nAvgs,
                eSum/nAvgs, e1DevSum/nAvgs, e2DevSum/nAvgs,
                math.sqrt(g1*g1 + g2*g2))

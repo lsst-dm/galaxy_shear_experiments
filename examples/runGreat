@@ -1,6 +1,5 @@
 #!/usr/bin/tcsh
-# Script to run shear measurement over a directory
-# runGal must be run first
+# Script to run great3sims.run for a specific set of subfields with shear, filter, and seeing
 if "$1" == "" then
     echo "usage: $0 base"
     exit(1)

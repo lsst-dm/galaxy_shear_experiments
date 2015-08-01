@@ -1,9 +1,9 @@
 shear_test_experiments
 July 28, 2015
 
-1.  Sample of OpSim Psf cutout scripts.  
+1.  Sample of PhoSim Psf cutout scripts.  
 
-The files pars and image.fits.gz in sample_psfs are an OpSim input catalog and output image.
+The files pars and image.fits.gz in sample_psfs are an PhoSim input catalog and output image.
 makelibrary can be used to create the psf library and index files needed for all of the
 following scripts
 

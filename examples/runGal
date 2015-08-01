@@ -1,6 +1,6 @@
 #!/usr/bin/tcsh
-# Script to run shear measurement over a directory
-# runGal must be run first
+# Script to run GalSim to create galaxy image files for a run
+# runGreat must be run first
 if "$1" == "" then
     echo "usage: $0 base"
     exit(1)
