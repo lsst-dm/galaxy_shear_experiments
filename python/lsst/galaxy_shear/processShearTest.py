@@ -160,6 +160,15 @@ class ProcessShearTestTask(ProcessBaseTask):
             calib = lsst.afw.image.Calib()
             calib.setFluxMag0((3531360874589.57, 21671681149.139))
             exp.setCalib(calib)
+
+            #  Add a real footprint.  Previously, the only footprint attached as for the entire bounding
+            #  rectangle.  This routines calls meas_algorithms for each postage stamp, which may be a
+            #  little inefficient, but does not require any catalog matching.
+            footprints = lsst.meas.algorithms.SourceDetectionTask().detectFootprints(exp, sigma=5).positive.getFootprints()
+            #  No footprint?  Then skip this object.
+            if len(footprints) < 1:
+                continue
+            source.setFootprint(footprints[0])
             #  Now do the measurements, calling the measure algorithms to increase speed
             sigma = None 
             try:
