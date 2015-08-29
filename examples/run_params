@@ -1,4 +1,5 @@
 #  Parameters used by the shear analysis test scripts
+exp_type control
 output_dir control/ground/constant
 
 #  These are used to manage to location and origin of the psfs
@@ -8,7 +9,7 @@ seeing 0.8
 psf_dir sample_psfs/psfs
 
 #  Settings for great3sims galaxy generation
-n_subfields 1
+n_subfields 4
 n_epochs 1
 ndims 10
 fov 1.500000

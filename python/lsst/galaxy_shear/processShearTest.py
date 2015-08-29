@@ -36,7 +36,30 @@ from lsst.meas.base.base import FATAL_EXCEPTIONS
 from lsst.obs.great3.processBase import *
 
 class ProcessShearTestConfig(ProcessBaseConfig):
-    pass
+    test = lsst.pex.config.Field(
+        dtype=str,
+        default=None,
+        optional=True,
+        doc="Name of the measurement test" 
+    )
+    measPlugin = lsst.pex.config.Field(
+        dtype=str,
+        default=None,
+        optional=True,
+        doc="registered name of measurement plugin" 
+    )
+    footprintSize = lsst.pex.config.Field(
+        dtype=int,
+        default=None,
+        optional=True,
+        doc="size of footprint, if fixed" 
+    )
+    noClobber = lsst.pex.config.Field(
+        dtype=bool,
+        default=False,
+        optional=True,
+        doc="Delete existing output src table?" 
+    )
 
 class ProcessShearTestTask(ProcessBaseTask):
     """This subclass obs.great3.ProcessBaseTask is used to call a measurement algorithm,
@@ -64,7 +87,7 @@ class ProcessShearTestTask(ProcessBaseTask):
         The Psf library and index in particular are needed.
         """
         sourceCat = lsst.afw.table.SourceCatalog(self.schema)
-        measPlugin = self.measurement.plugins.keys()[-1]
+        measPlugin = self.config.measPlugin
         fieldNames = self.schema.extract(measPlugin + "*").keys()
         self.e1Key = None
         self.e2Key = None
@@ -104,7 +127,14 @@ class ProcessShearTestTask(ProcessBaseTask):
             sourceRecord.set(self.g1Key, simRecord.get("g1"))
             sourceRecord.set(self.g2Key, simRecord.get("g2"))
             position = lsst.afw.geom.Point2I(simRecord.get(xKey), simRecord.get(yKey))
-            bbox = lsst.afw.geom.Box2I(position - offset, self.dims)
+            footprintSize = self.config.footprintSize
+            # if the footprintSize is set, use it as the dimension of the bounding box
+            if not footprintSize is None:
+                offset = lsst.afw.geom.Extent2I((footprintSize/2)-1, (footprintSize/2)-1)
+                dims = lsst.afw.geom.Extent2I(footprintSize, footprintSize)
+            else:
+                dims = self.dims
+            bbox = lsst.afw.geom.Box2I(position - offset, dims)
             footprint = lsst.afw.detection.Footprint(bbox, imageBBox)
             peakRecord = footprint.getPeaks().addNew()
             peakRecord.setFx(position.getX())
@@ -120,6 +150,14 @@ class ProcessShearTestTask(ProcessBaseTask):
         task, instead calling the plugins directly to improve speed and remove
         noise replacement.
         """
+        if self.config.noClobber:
+            if not self.config.test is None:
+                dataRef.dataId["test"] = self.config.test
+                if dataRef.datasetExists("test_src"):
+                    return
+            else:
+                if dataRef.datasetExists("src"):
+                    return
         exposure = self.buildExposure(dataRef)
         sourceCat = self.buildSourceCatalog(exposure.getBBox(lsst.afw.image.PARENT), dataRef)
         images_file = dataRef.get("image", immediate=True)
@@ -132,6 +170,7 @@ class ProcessShearTestTask(ProcessBaseTask):
         if len(sourceCat) > 0:
             g1 = sourceCat[0].get(self.g1Key)
             g2 = sourceCat[0].get(self.g2Key)
+            theta0 = 180.0*math.atan2(g2,g1)/2.0*math.pi
 
         for source in sourceCat:
             #   Locate the psb_library and get the indexed psf
@@ -151,7 +190,11 @@ class ProcessShearTestTask(ProcessBaseTask):
             x = int(source.getFootprint().getCentroid().getX()+1) - (self.dims.getX()/2)
             y = int(source.getFootprint().getCentroid().getY()+1) - (self.dims.getY()/2)
             bbox = lsst.afw.geom.Box2I(lsst.afw.geom.Point2I(x,y), self.dims)
-            exp = lsst.afw.image.ExposureF(exposure, bbox)
+            try:
+                exp = lsst.afw.image.ExposureF(exposure, bbox)
+            except:
+                import pdb
+                pdb.set_trace()
             exp.setPsf(psf)
             CD = numpy.array([[5.55E-5, 0.0], [0.0, 5.55E-5]])
             crpix = lsst.afw.geom.Point2D(0.0,0.0)
@@ -160,15 +203,30 @@ class ProcessShearTestTask(ProcessBaseTask):
             calib = lsst.afw.image.Calib()
             calib.setFluxMag0((3531360874589.57, 21671681149.139))
             exp.setCalib(calib)
+#            # artificially create a shape
+#            array = exp.getMaskedImage().getImage().getArray()
+#            xlen = array.shape[1]
+#            ylen = array.shape[0]
+#            x0 = .7 + xlen/2
+#            y0 = -.3 + ylen/2
+#            A = 1000.0
+#            theta0 = 60.0
+#            xsigma = 8.0
+#            ysigma =  6.0 
+#            e0 = (xsigma*xsigma - ysigma*ysigma)/(xsigma*xsigma + ysigma*ysigma)    
+#            for x in range(xlen):
+#                for y in range(ylen):
+#                    xp = float(x-x0)*math.cos(theta0*math.pi/180.0) + float(y-y0) * math.sin(theta0*math.pi/180.0)
+#                    yp = -float(x-x0)*math.sin(theta0*math.pi/180.0) + float(y-y0) * math.cos(theta0*math.pi/180.0)
+#                    array[y,x] = A * math.exp(-(xp*xp)/(2.0*xsigma*xsigma) - (yp*yp)/(2.0*ysigma*ysigma))
+#            #  Add a real footprint
 
-            #  Add a real footprint.  Previously, the only footprint attached as for the entire bounding
-            #  rectangle.  This routines calls meas_algorithms for each postage stamp, which may be a
-            #  little inefficient, but does not require any catalog matching.
-            footprints = lsst.meas.algorithms.SourceDetectionTask().detectFootprints(exp, sigma=5).positive.getFootprints()
-            #  No footprint?  Then skip this object.
-            if len(footprints) < 1:
-                continue
-            source.setFootprint(footprints[0])
+            if self.config.footprintSize is None:
+                footprints = lsst.meas.algorithms.SourceDetectionTask().detectFootprints(exp, sigma=5.0).positive.getFootprints()
+                if len(footprints) < 1:
+                    continue
+                source.setFootprint(footprints[0])
+
             #  Now do the measurements, calling the measure algorithms to increase speed
             sigma = None 
             try:
@@ -181,7 +239,30 @@ class ProcessShearTestTask(ProcessBaseTask):
             except Exception as error:
                 self.log.warn("Error in %s.measure on record %s: %s"
                               % (self.measurement.plugins[plugin].name, source.getId(), error))
-        dataRef.put(sourceCat, "src")
+
+            if not self.e1Key is None:
+                e1 = source.get(self.e1Key)
+                e2 = source.get(self.e2Key)
+            else:
+                xx = source.get(self.xxKey)
+                yy = source.get(self.yyKey)
+                xy = source.get(self.xyKey)
+                e1 = (xx - yy) / (xx + yy)
+                e2 = 2 * xy / (xx + yy)
+            e = math.sqrt(e1 * e1 + e2 * e2)
+
+            #   Calculate the rotation in the range [-pi, pi], just to check the pairs
+            theta = 180.0*math.atan2(e2,e1)/(2.0*math.pi)
+            while theta < 0:
+                theta = 360 + theta
+            while theta > 90.0:
+                theta = theta-90.0
+
+        if not self.config.test is None:
+            dataRef.dataId["test"] = self.config.test
+            dataRef.put(sourceCat, "test_src")
+        else:
+            dataRef.put(sourceCat, "src")
 
     @classmethod
     def _makeArgumentParser(cls):

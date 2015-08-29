@@ -1,3 +1,0 @@
-date
-python ../bin/processShearTest.py base -j 1 --configfile=processShearTest.py --id subfield=0 epoch=0 --output base 
-date
