@@ -1,4 +1,3 @@
-from great3sims import constants, run
 import argparse
 import os
 import shutil
@@ -6,8 +5,15 @@ import signal
 import sys
 import time
 import subprocess
-import lsst.galaxy_shear.analyzeShearTest as analyzeShearTest
+
+
+import lsst.pex.config as pexConfig
 import lsst.afw.table
+
+from great3sims import constants, run
+from lsst.galaxy_shear.shearConfig import RunShearConfig
+from lsst.galaxy_shear.analyzeShearTest import runAnal
+
 #    input a list of pids which we want to wait on
 #    return when all are done, and none has returned an error
 
@@ -76,63 +82,38 @@ def runcmd(args,env=None,stdoutname=None,stderrname=None,append=True):
         raise StandardError(errstring)
     return
 
-def runShear(baseDirs, test=None, forks=1, clobber=True, great3=False, galsim=False, meas=False, anal=False, nGrow=None, footprintSize=None):
+def runShear(baseDirs, test=None, forks=1, clobber=1, great3=False, galsim=False, meas=False, anal=False):
     #   open the run_params file for this run and extract what we need.
-    fin = open("run_params", 'r')
-    params = dict()
-    for line in fin:
-        if line.isspace():
-            continue
-        inp = line.split()
-        if inp[0][0] == '#':
-            continue
-        params[inp[0]] = inp[1]
     
-    n_subfields = int(params["n_subfields"])
-    n_epochs = int(params["n_epochs"])
-    ndims = int(params["ndims"])
-    galaxy_stamp_size = int(params["galaxy_stamp_size"])
-    gal_dir = os.path.abspath(params["gal_dir"])
-    fov = float(params["fov"])
-    exp_type = params["exp_type"]
-    output_dir = params["output_dir"]
-    if "psf_dir" in params.keys():
-        psf_dir = os.path.abspath(params["psf_dir"])
-    if "shear_value" in params.keys():
-        shear_value = params["shear_value"]
-    shape_field = params["shape_field"] 
     #  Do initial directory setup
     pidlist = []
     if great3:
         for base in baseDirs:
-                if os.path.isdir(base + "/control"):
-                     shutil.rmtree(base + "/control")
-                os.makedirs(base + "/control/ground/constant")
-                shutil.copy("run_params", os.path.join(base, "run_params"))
+                config = RunShearConfig()
+                config.load(os.path.join(base, "shear.config"))
+                great3_dir = base + "/" + config.exp_type + "/ground/constant"
+                if os.path.isdir(great3_dir):
+                     shutil.rmtree(great3_dir)
+                os.makedirs(great3_dir)
                 baseArgs = base.split("_")
                 if  baseArgs[0][0] == 'f' and baseArgs[0][1:].isdigit() and len(baseArgs) == 3:
-                    filter = int(baseArgs[0][1:])
-                    seeing = float(baseArgs[1])
-                    shear_value = float(baseArgs[2])
-                    psf_dir = os.path.join(params["psf_lib_dir"], "f%d_%s"%(filter, seeing))
-                    fout = open(os.path.join(base, "run_params"), "a")
-                    fout.write("filter %d\n"%filter)
-                    fout.write("seeing %s\n"%seeing)
-                    fout.write("shear_value %s\n"%shear_value)
-                    fout.write("psf_dir %s\n"%psf_dir)
-                    fout.close()
-
-                os.symlink(psf_dir, base + "/control/ground/constant/psfs") 
-                fout = open("%s/%s/_mapper"%(base, output_dir), "w")
+                    config.filter = int(baseArgs[0][1:])
+                    config.seeing = float(baseArgs[1])
+                    config.shear_value = float(baseArgs[2])
+                    config.psf_dir = os.path.join(config.psf_lib_dir,
+                                        "f%d_%s"%(config.filter, config.seeing))
+                    os.symlink(config.psf_dir, os.path.join(great3_dir, "psfs")) 
+                else:
+                    os.symlink(os.path.abspath(config.psf_dir), os.path.join(great3_dir, "psfs")) 
+                fout = open(os.path.join(great3_dir, "_mapper"), "w")
                 fout.write("lsst.obs.great3.Great3Mapper")
                 fout.close()
-                shear_value=float(shear_value)
-                constants.image_size_deg = fov
-                constants.nrows = ndims
-                constants.ncols = ndims
-                constants.n_subfields =  n_subfields
-                constants.xsize["ground"][True] = galaxy_stamp_size
-                constants.xsize["ground"][False] = galaxy_stamp_size
+                constants.image_size_deg = config.fov
+                constants.nrows = config.ndims
+                constants.ncols = config.ndims
+                constants.n_subfields =  config.n_subfields
+                constants.xsize["ground"][True] = config.galaxy_stamp_size
+                constants.xsize["ground"][False] = config.galaxy_stamp_size
                 constants.n_subfields_per_field["constant"][True] = 1
                 constants.subfield_grid_subsampling = 1
                 constants.n_deep_subfields = 0
@@ -147,23 +128,31 @@ def runShear(baseDirs, test=None, forks=1, clobber=True, great3=False, galsim=Fa
                         pidlist.append(pid)
                     else:
                         # we are the child
-                        run(base, gal_dir=gal_dir, steps=["metaparameters", "catalogs", "config",],
-                            experiments=[exp_type], obs_type="ground", shear_type=["constant"], 
-                            draw_psf_src = '%s/control/ground/constant/psfs/psfs.index'%base, subfield_max=subfield_max,
-                            shear_value=shear_value, shear_angle=60)
+                        run(base, gal_dir=config.gal_dir, steps=["metaparameters", "catalogs", "config",],
+                            experiments=[config.exp_type], obs_type="ground", shear_type=["constant"], 
+                            draw_psf_src = '%s/control/ground/constant/psfs/psfs.index'%base, 
+                            subfield_max=subfield_max,
+                            shear_value=config.shear_value,
+                            shear_angle=config.shear_angle
+                        )
                         sys.exit(0)
                 else:
-                        run(base, gal_dir=gal_dir, steps=["metaparameters", "catalogs", "config",],
-                            experiments=[exp_type], obs_type="ground", shear_type=["constant"], 
-                            draw_psf_src = '%s/control/ground/constant/psfs/psfs.index'%base, subfield_max=subfield_max,
-                            shear_value=shear_value, shear_angle=60)
-        waitforpids(pidlist)
+                    run(base, gal_dir=config.gal_dir, steps=["metaparameters", "catalogs", "config",],
+                        experiments=[config.exp_type], obs_type="ground", shear_type=["constant"], 
+                        draw_psf_src = '%s/control/ground/constant/psfs/psfs.index'%base, 
+                        subfield_max=subfield_max,
+                        shear_value=config.shear_value,
+                        shear_angle=config.shear_angle
+                    )
+
+    waitforpids(pidlist)
 
     if galsim:
         for base in baseDirs:
+                config = RunShearConfig()
+                config.load(os.path.join(base, "shear.config"))
                 cwd = os.getcwd()
                 os.chdir(base)
-                #runcmd(("galsim", "cgc.yaml", "output.nproc=%d"%forks, "image.nproc=%d"%forks),
                 print "output.noclobber=%s"%(not clobber)
                 runcmd(("galsim", "cgc.yaml", "output.noclobber=%s"%(not clobber)),
                         stdoutname="galsim.stdout", append=False)
@@ -175,22 +164,29 @@ def runShear(baseDirs, test=None, forks=1, clobber=True, great3=False, galsim=Fa
 
     if meas:
         for base in baseDirs:
+            config = RunShearConfig()
+            config.load(os.path.join(base, "shear.config"))
             tries = 0
             shutil.copy("processShearTest.py", "temp.py")
             fout = open("temp.py", "a")
-            fout.write("root.galaxyStampSize = %d\n"%galaxy_stamp_size)
-            fout.write("root.measPlugin = '%s'\n"%shape_field)
+            fout.write("root.galaxyStampSize = %d\n"%config.galaxy_stamp_size)
+            fout.write("root.measPlugin = '%s'\n"%config.shape_field)
             fout.write("root.noClobber = %s\n"%(not clobber))
-            if not nGrow is None:
+            if not test is None and test[0] == 'n':
+                nGrow = int(test[1:])
                 fout.write('root.measurement.plugins["modelfit_CModel"].region.nGrowFootprint=%d\n'%nGrow)
             if not test is None:
                 fout.write('root.test="%s"\n'%test)
+            if not test is None and test[0] == 's':
+                footprintSize = int(test[1:])
+            if not test is None:
+                fout.write('root.test="%s"\n'%test)
             fout.close()
-            out = os.path.join(base, output_dir)
+            out = os.path.join(base, config.exp_type + "/ground/constant")
             while tries < 5:
                 try:
                     runcmd(("processShearTest.py", out, "-j", str(forks), "--configfile=temp.py",
-                        "--id", "subfield=0..%d"%(n_subfields-1), "epoch=0..%d"%(n_epochs-1),
+                        "--id", "subfield=0..%d"%(config.n_subfields-1), "epoch=0..%d"%(config.n_epochs-1),
                         "--output", out
                         ), stdoutname="%s/meas.stdout"%base, append=False)
                     break
@@ -203,16 +199,9 @@ def runShear(baseDirs, test=None, forks=1, clobber=True, great3=False, galsim=Fa
         else: 
             outfile = "anal_%s.fits"%test
         for base in baseDirs:
-                baseArgs = base.split("_")
-                if  baseArgs[0][0] == 'f' and baseArgs[0][1:].isdigit() and len(baseArgs) == 3:
-                    filter = int(baseArgs[0][1:])
-                    seeing = float(baseArgs[1])
-                    shear_value = float(baseArgs[2])
-                    psf_dir = os.path.join(params["psf_lib_dir"], "f%d_%s"%(filter, seeing))
-                    params["filter"] = filter
-                    params["seeing"] = seeing
-                    params["shear_value"] = shear_value
-                    params["psf_dir"] = psf_dir
+                config = RunShearConfig()
+                config.load(os.path.join(base, "shear.config"))
+                config.psf_dir = os.path.join(config.psf_lib_dir, "f%d_%s"%(config.filter, config.seeing))
                 if os.path.isfile(os.path.join(base, outfile)) and not clobber:
                     continue
                 if forks > 1:
@@ -224,10 +213,10 @@ def runShear(baseDirs, test=None, forks=1, clobber=True, great3=False, galsim=Fa
                         pidlist.append(pid)
                     else:
                         # we are the child
-                        analyzeShearTest.runAnal(base, os.path.join(base, outfile), os.path.join(base, "sum_"+outfile), params, test=test)
+                        runAnal(base, outfile, config, test=test)
                         sys.exit(0)
                 else:
-                        analyzeShearTest.runAnal(base, os.path.join(base, outfile), os.path.join(base, "sum_"+outfile), params, test=test)
+                        runAnal(base, outfile, config, test=test)
         if forks > 1:
             waitforpids(pidlist)
         outCat = None
@@ -241,36 +230,64 @@ def runShear(baseDirs, test=None, forks=1, clobber=True, great3=False, galsim=Fa
         if not outCat is None: 
             outCat.writeFits(os.path.join("sum_"+outfile))
             
-            
-        
-
 if __name__ == "__main__":
     """
-    This main program runs a single directory containing a run_params
+    This main program reads data for multiple runs in filter, seeing, and shear value, and
 
-    basedir               runs from the specified directory
+    filter                runs with the specified filter
+    seeing_values         runs with the specified seeing
+    shear_values          runs with the specified shear values
     """
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("base_dir", help="name of the directory to run from", type = str)
+    parser.add_argument("-b", "--base", help="directory containing shear.config", type = str)
+    parser.add_argument("-v", "--shear_values", help="comma separated shear values",
+        type = str, default=None)
+    parser.add_argument("-f", "--filter", help="number of the filter for PhoSim", type = int)
+    parser.add_argument("-s", "--seeing", help="comma separated seeing values",
+        type = float, default=None)
+    parser.add_argument("-c", "--clobber", type=int, help="set to 0 to preserve existing outputs",
+        default=1)
+    parser.add_argument("-t", "--test", help="run on specific data subset")
+    parser.add_argument("-p", "--processes", help="Number of forks, max", type = int, default=1)
     parser.add_argument("-3", "--great3", action='store_true', help="run great3sims")
     parser.add_argument("-g", "--galsim", action='store_true', help="run galsim")
     parser.add_argument("-m", "--meas", action='store_true', help="run measurement algorithm")
     parser.add_argument("-a", "--anal", action='store_true', help="run analysis program")
-    parser.add_argument("-t", "--test", type=str, help="Name of the test", default=None)
-    parser.add_argument("-n", "--nGrow", type=int, help="Grow footprints", default=None)
-    parser.add_argument("-s", "--footprintSize", type=int, help="set footprint to a square of this size", default=None)
-    parser.add_argument("-c", "--clobber", type=int, help="Delete or keeps existing files?", default=1)
+
     args = parser.parse_args()
 
-    #  Test names automatically set the corresponding argument
-    if args.test[0] == "n" and args.nGrow is None:
-        nGrow = int(args.test[1:])
+    #   open the config file for this run
+    config = RunShearConfig()
+    if args.base is None:
+        config.load("shear.config")
     else:
-        nGrow = args.nGrow
-    if args.test[0] == "s" and args.footprintSize is None:
-        footprintSize = int(args.test[1:])
+        config.load(os.path.join(args.base, "shear.config"))
+    if not args.filter is None:
+        config.filter = args.filter
+    if not args.seeing is None:
+        config.seeing = args.seeing
+
+    #  Do initial directory setup
+    if not args.base is None and not args.shear_values is None:
+        print "Cannot set both a base directory and a set of filter, seeing, and shear values."
+        sys.exit(1)
+    if args.base is None and args.shear_values is None:
+        print "Must have either a base directory or a set of filter, seeing, and shear values."
+        sys.exit(1)
+
+    baseDirs = []
+    #  If list of shear_values are provided, create directories named with filter, seein, shear.
+    if not args.shear_values is None:
+        for shear_value in args.shear_values.split(","):
+            base = 'f%d_%.1f_%s'%(config.filter, config.seeing, shear_value)
+            config.shear_value = float(shear_value)
+            if not os.path.isdir(base):
+                os.makedirs(base)
+            config.save(os.path.join(base, "shear.config"))
+            baseDirs.append(base)
     else:
-        footprintSize = args.footprintSize
+        baseDirs.append(args.base)
         
-    runShear((args.base_dir,), clobber=args.clobber, great3=args.great3, galsim=args.galsim, meas=args.meas, anal=args.anal, test=args.test, nGrow=nGrow, footprintSize=footprintSize)
+    runShear(baseDirs, clobber=args.clobber, forks=args.processes, great3=args.great3,
+             galsim=args.galsim, meas=args.meas, anal=args.anal, test=args.test)

@@ -73,12 +73,19 @@ class ProcessShearTestTask(ProcessBaseTask):
 
     def __init__(self, **kwds):
         ProcessBaseTask.__init__(self, **kwds)
-        self.psfLibraryKey = self.schema.addField("psf_library", type = int, doc = "number of psf library")
-        self.psfIndexKey = self.schema.addField("psf_index", type = int, doc = "index of psf within library")
-        self.psfNumberKey = self.schema.addField("psf_number", type = int, doc = "number of psf_nnnn.fits")
+        self.psfLibraryKey = self.schema.addField("psf_library",
+            type = int, doc = "number of psf library")
+        self.psfIndexKey = self.schema.addField("psf_index",
+            type = int, doc = "index of psf within library")
+        self.psfNumberKey = self.schema.addField("psf_number",
+            type = int, doc = "number of psf_nnnn.fits")
 
-        self.g1Key = self.schema.addField("g1", type = float, doc = "GalSim constant g1 value")
-        self.g2Key = self.schema.addField("g2", type = float, doc = "GalSim constant g2 value")
+        self.g1Key = self.schema.addField("g1", type = float,
+            doc = "GalSim constant g1 value")
+        self.g2Key = self.schema.addField("g2", type = float,
+            doc = "GalSim constant g2 value")
+        self.noDetectKey = self.schema.addField("flag_noDetection", type = int,
+            doc = "No 5 sigma detection")
 
     def buildSourceCatalog(self, imageBBox, dataRef):
         """Build an empty source catalog, using the provided sim catalog's position to generate
@@ -150,6 +157,7 @@ class ProcessShearTestTask(ProcessBaseTask):
         task, instead calling the plugins directly to improve speed and remove
         noise replacement.
         """
+        # The noClobber flag protects data which was already run from deletion
         if self.config.noClobber:
             if not self.config.test is None:
                 dataRef.dataId["test"] = self.config.test
@@ -180,7 +188,8 @@ class ProcessShearTestTask(ProcessBaseTask):
             if dataRef.datasetExists("psf_file"):
                 psf_file = dataRef.get("psf_file", immediate=True)
             else:
-                print "loading Library %d, for psfnumber %d"%(source.get("psf_library"), source.get("psf_number"))
+                print "loading Library %d, for psfnumber %d"%(source.get("psf_library"),
+                    source.get("psf_number"))
 
                 psf_file = dataRef.get("psf_library", immediate=True)
             data = psf_file.getArray().astype(numpy.float64)
@@ -203,29 +212,16 @@ class ProcessShearTestTask(ProcessBaseTask):
             calib = lsst.afw.image.Calib()
             calib.setFluxMag0((3531360874589.57, 21671681149.139))
             exp.setCalib(calib)
-#            # artificially create a shape
-#            array = exp.getMaskedImage().getImage().getArray()
-#            xlen = array.shape[1]
-#            ylen = array.shape[0]
-#            x0 = .7 + xlen/2
-#            y0 = -.3 + ylen/2
-#            A = 1000.0
-#            theta0 = 60.0
-#            xsigma = 8.0
-#            ysigma =  6.0 
-#            e0 = (xsigma*xsigma - ysigma*ysigma)/(xsigma*xsigma + ysigma*ysigma)    
-#            for x in range(xlen):
-#                for y in range(ylen):
-#                    xp = float(x-x0)*math.cos(theta0*math.pi/180.0) + float(y-y0) * math.sin(theta0*math.pi/180.0)
-#                    yp = -float(x-x0)*math.sin(theta0*math.pi/180.0) + float(y-y0) * math.cos(theta0*math.pi/180.0)
-#                    array[y,x] = A * math.exp(-(xp*xp)/(2.0*xsigma*xsigma) - (yp*yp)/(2.0*ysigma*ysigma))
-#            #  Add a real footprint
 
+            #  Add a real footprint
             if self.config.footprintSize is None:
-                footprints = lsst.meas.algorithms.SourceDetectionTask().detectFootprints(exp, sigma=5.0).positive.getFootprints()
-                if len(footprints) < 1:
-                    continue
-                source.setFootprint(footprints[0])
+                try:
+                    footprints = lsst.meas.algorithms.SourceDetectionTask().detectFootprints(exp,
+                                 sigma=5.0).positive.getFootprints()
+                    source.setFootprint(footprints[0])
+                    source.set(self.noDetectKey, 0)
+                except:
+                    source.set(self.noDetectKey, 1)
 
             #  Now do the measurements, calling the measure algorithms to increase speed
             sigma = None 
@@ -239,7 +235,6 @@ class ProcessShearTestTask(ProcessBaseTask):
             except Exception as error:
                 self.log.warn("Error in %s.measure on record %s: %s"
                               % (self.measurement.plugins[plugin].name, source.getId(), error))
-
             if not self.e1Key is None:
                 e1 = source.get(self.e1Key)
                 e2 = source.get(self.e2Key)

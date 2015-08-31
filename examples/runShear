@@ -1,0 +1,19 @@
+#!/usr/bin/tcsh
+# Script to run analysis over a directory
+# runGal and runMeas must be run first
+if "$1" == "" then
+    echo "usage: $0 [-3] [-g] [-m] [-a]"
+    exit(1)
+endif
+setenv base $1
+if (! -d $base) then
+    echo "creating directory $base"
+    mkdir $base
+endif
+cp shear.config $base
+cp processShearTest.py $base
+if $2 == "" then
+    python $GALAXY_SHEAR_EXPERIMENTS_DIR/python/lsst/galaxy_shear/runShear.py -b $base -3 -g -m -a 
+else
+    python $GALAXY_SHEAR_EXPERIMENTS_DIR/python/lsst/galaxy_shear/runShear.py -b $*
+endif

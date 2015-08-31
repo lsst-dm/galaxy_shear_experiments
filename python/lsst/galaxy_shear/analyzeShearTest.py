@@ -42,10 +42,10 @@ import os.path
 import lsst.daf.persistence as dafPersist
 import lsst.afw.table as afwTable
 
+from lsst.galaxy_shear.shearConfig import RunShearConfig
 
-
-def runAnal(base_dir, out_fits, out_sum_fits, params, test=None):
-
+def runAnal(baseDir, outFile, config, test=None):
+    #  Create a summary table of the src*.fits tables in baseDir
     schema = afwTable.Schema()
     filterKey = schema.addField("filter", type = int, doc = "filter 2 or 3 used in PhoSim psf generator.")
     seeingKey = schema.addField("seeing", type = float, doc = "raw seeing used by PhoSim.")
@@ -66,25 +66,19 @@ def runAnal(base_dir, out_fits, out_sum_fits, params, test=None):
     e2SumKey = schema.addField("e2Sum", type = float, doc = "weighted sum of e2 for all sources")
     weightSumKey = schema.addField("weightSum", type = float, doc = "sum of weights for all sources")
     outSourceCat = afwTable.BaseCatalog(schema)
-    shear_value = float(params["shear_value"])
-    filter =  int(params["filter"])
-    seeing  = float(params["seeing"])
-    n_subfields = int(params["n_subfields"])
-    n_epochs = int(params["n_epochs"])
-    galaxy_stamp_size = int(params["galaxy_stamp_size"])
-    output_dir = params["output_dir"]
+
 
     #   The shape type can be "moments" or "ellipticity"
     #   If we done have an e_sigma, the signal field  tells us to extract the weighting function
     #   from the SNR of some other field, where the sigma will be the error, and the
     #   The sigma used for weighting is shape_field/(sigma_field/sigma_signal_field)
-    if "shape_field" in params.keys():
-        shape_field = params["shape_field"] + "_"
-        shape_type = params["shape_type"]
-        if "sigma_field" in params.keys():
-            sigma_field = params["sigma_field"]
-            if "sigma_signal_field" in params.keys():
-                sigma_signal_field = params["sigma_signal_field"]
+    if "shape_field" in config.keys():
+        shape_field = config.shape_field + "_"
+        shape_type = config.shape_type
+        if "sigma_field" in config.keys():
+            sigma_field = config.sigma_field
+            if "sigma_signal_field" in config.keys():
+                sigma_signal_field = config.sigma_signal_field
             else:
                 sigma_signal_field = None
         else:
@@ -98,7 +92,7 @@ def runAnal(base_dir, out_fits, out_sum_fits, params, test=None):
         sigma_signal_field = None
 
     #   Use the butler to get the src.fits file for each subfield/epoch
-    butler = dafPersist.Butler(root=os.path.join(base_dir, output_dir))
+    butler = dafPersist.Butler(root=os.path.join(baseDir, config.exp_type + "/ground/constant"))
 
     count = 0
     eSum = 0.0
@@ -109,8 +103,8 @@ def runAnal(base_dir, out_fits, out_sum_fits, params, test=None):
     e2DevSumSq = 0.0
     weightSum = 0.0
     nAvgs = 0
-    for subfield in range(n_subfields):
-        for epoch in range(n_epochs):
+    for subfield in range(config.n_subfields):
+        for epoch in range(config.n_epochs):
             catCount = 0
             catESum = 0.0
             catE1Sum = 0.0
@@ -123,7 +117,7 @@ def runAnal(base_dir, out_fits, out_sum_fits, params, test=None):
             if len(sourceCat) > 0:
                 g1 = sourceCat[0].get("g1")
                 g2 = sourceCat[0].get("g2")
-   
+
             #  These are constant values per subfield recorded by galsim
 
             #   Set up the measurement keys, depending on type (moments or ellip)
@@ -156,8 +150,8 @@ def runAnal(base_dir, out_fits, out_sum_fits, params, test=None):
                     xx = source.get(xxKey)
                     yy = source.get(yyKey)
                     xy = source.get(xyKey)
-                    e1 = .5 * (xx - yy) / (xx + yy)
-                    e2 = .5 * 2 * xy / (xx + yy)
+                    e1 = (xx - yy) / (xx + yy)
+                    e2 = 2 * xy / (xx + yy)
                 e = math.sqrt(e1 * e1 + e2 * e2)
 
                 #   Calculate the rotation in the range [-pi, pi], just to check the pairs
@@ -207,9 +201,9 @@ def runAnal(base_dir, out_fits, out_sum_fits, params, test=None):
                  outrec = outSourceCat.addNew()
                  outrec.set(g1Key, float(g1))
                  outrec.set(g2Key, float(g2))
-                 outrec.set(filterKey, filter)
-                 outrec.set(seeingKey, seeing)
-                 outrec.set(shearKey, shear_value)
+                 outrec.set(filterKey, config.filter)
+                 outrec.set(seeingKey, config.seeing)
+                 outrec.set(shearKey, config.shear_value)
                  outrec.set(countKey, catCount)
                  outrec.set(gKey, math.sqrt(g1*g1 + g2*g2))
                  outrec.set(eAvgKey, eAvg)
@@ -220,7 +214,7 @@ def runAnal(base_dir, out_fits, out_sum_fits, params, test=None):
                  outrec.set(e2SumKey, catE2Sum)
                  outrec.set(weightSumKey, catWeightSum)
                  nAvgs = nAvgs + 1
-    outSourceCat.writeFits(out_fits)
+    outSourceCat.writeFits(os.path.join(baseDir, outFile))
     #   Now summarize the averages and stddevs for all the subfield/epochs
     if nAvgs > 2:
         eStddev = math.sqrt( (nAvgs * eSumSq - eSum * eSum)/(nAvgs * (nAvgs - 1)))
@@ -234,14 +228,14 @@ def runAnal(base_dir, out_fits, out_sum_fits, params, test=None):
         print "%d subfields: e = %.4f, e1 = %.4f, e2 = %.4f, g = %.3f"%(nAvgs,
                eSum/nAvgs, e1DevSum/nAvgs, e2DevSum/nAvgs,
                math.sqrt(g1*g1 + g2*g2))
-    
+
     sumSourceCat = afwTable.BaseCatalog(outSourceCat.getSchema())
     sumrec = sumSourceCat.addNew()
     sumrec.set(g1Key, float(g1))
     sumrec.set(g2Key, float(g2))
-    sumrec.set(filterKey, filter)
-    sumrec.set(seeingKey, seeing)
-    sumrec.set(shearKey, shear_value)
+    sumrec.set(filterKey, config.filter)
+    sumrec.set(seeingKey, config.seeing)
+    sumrec.set(shearKey, config.shear_value)
     sumrec.set(countKey, count)
     sumrec.set(gKey, math.sqrt(g1*g1 + g2*g2))
     sumrec.set(eAvgKey, eSum/nAvgs)
@@ -255,41 +249,29 @@ def runAnal(base_dir, out_fits, out_sum_fits, params, test=None):
     sumrec.set(e2SumKey, e2DevSum)
     sumrec.set(e2SumKey, catE2Sum)
     sumrec.set(weightSumKey, weightSum)
-    sumSourceCat.writeFits(out_sum_fits)
-    count = 0
-    eSum = 0.0
-    e1DevSum = 0.0
-    e2DevSum = 0.0
-    eSumSq = 0.0
-    e1DevSumSq = 0.0
-    e2DevSumSq = 0.0
+    sumSourceCat.writeFits(os.path.join(baseDir, "sum_" + outFile))
 
 if __name__ == "__main__":
     """
 
     base_dir         Name of the subdirectory containing run_params file
-    out_cat          Name of the catalog for output. .fits is appended
+    out_file         Name of the catalog for output. .fits is appended
+    test             Name of the test directory, if this is a named test
     """
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("basedir", type=str, help="Name of the directory containing run_params file")
-    parser.add_argument("-o", "--outfile", type=str, help="Name of the catalog for output", default=None)
-    parser.add_argument("-t", "--test", type=str, help="Type of the test (set of source tables)", default=None)
+    parser.add_argument("base_dir", type=str, help="Name of the directory containing run_params file")
+    parser.add_argument("-o", "--out_file", type=str, help="Name of the catalog for output", default=None)
+    parser.add_argument("-t", "--test", type=str, help="Type of the test (set of source tables)",
+                        default=None)
     args = parser.parse_args()
-    if args.outfile is None:
+    if args.out_file is None:
         if args.test is None:
-            outfile = os.path.join(args.basedir, "subfields_" + args.test + ".fits")
+            out_file = "subfields_" + args.test + ".fits"
         else:
-            outfile = os.path.join(args.basedir, "subfields.fits")
+            out_file = "subfields.fits"
 
-    #   open the run_params file for this run and extract what we need.
-    fin = open(os.path.join(args.base_dir, "run_params"), 'r')
-    params = dict()
-    for line in fin:
-        if line.isspace():
-            continue
-        inp = line.split()
-        if inp[0][0] == '#':
-            continue
-        params[inp[0]] = inp[1]
-    runAnal(args.base_dir, args.out_cat, params, test=args.test)
+    #   open the config file for this run
+    config = RunShearConfig()
+    config.load(os.path.join(base_dir, "shear.config"))
+    runAnal(args.base_dir, out_file, config, test=args.test)
