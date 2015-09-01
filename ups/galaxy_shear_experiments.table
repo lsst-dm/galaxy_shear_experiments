@@ -3,3 +3,4 @@ setupRequired(meas_base 10.0+2 [>= 10.0+2])
 setupRequired(obs_lsstSim 10.0+2 [>= 10.0+2])
 
 envPrepend(PYTHONPATH, ${PRODUCT_DIR}/python)
+envPrepend(PATH, ${PRODUCT_DIR}/bin)

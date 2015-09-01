@@ -1,5 +1,5 @@
 shear_test_experiments
-July 28, 2015
+August 28, 2015
 
 1.  Sample of PhoSim Psf cutout scripts.  
 
@@ -10,20 +10,17 @@ following scripts
 2.  Sample Great3, GalSim, measurement, and analysis runs
 
 The file run_params is a sample file which drives all of the scripts.
+The runbase script can be used to call the four shear test stages: great3, galsim, measure, analyze.
 
-A subdirectory called base is created and run_params is copied to it.
+    runbase base_directory [-3] [-g] [-m] [a]
 
-The runbase scripts can be used to call runGreat, runGal, runMeas, and runAnal,
-or these scripts can be run separately.  
+A subdirectory called base_directory is created and run_params is copied to it.  Python code is then
+called (runShear.py) to run each of the selected stages:
 
-    -- runGreat sets up the GalSim output directory, soft links the required psf libraries,
+    -- -3 uses great3 to set up the GalSim output directory, soft links the required psf libraries,
        and creates the yaml files for galsim
-    -- runGal runs GalSim on the created yaml files.
-    -- runMeas runs the selected measurement algorithm.  Note that both processShearTest.py
+    -- -g runs GalSim on the created yaml files.
+    -- -m runs the selected measurement algorithm.  Note that both processShearTest.py
        and run_params must be set up with the correct algorithm setup and field names.
-    -- runAnal runs statistics on the individual measurement catalogs, and stores a 
+    -- -a runs statistics on the individual measurement catalogs, and stores a 
        statistical summary of each run in anal.cat.fits.  This BaseCatalog is cumulative.
-
-3. runPlot is used to plot the results from runAnal run over all of the runs with various
-   filter, seeing, and shear settings.  It requies the output of runAnal. A sample of this
-   file is in sample_anal.
