@@ -14,10 +14,12 @@ from great3sims import constants, run
 from lsst.galaxy_shear.shearConfig import RunShearConfig
 from lsst.galaxy_shear.analyzeShearTest import runAnal
 
-#    input a list of pids which we want to wait on
-#    return when all are done, and none has returned an error
-
 def waitforpids(pidlist, waituntil=0):
+    """
+    input a list of pids which we want to wait on
+    return when all are done, and none has returned an error
+    """
+
     while len(pidlist) > waituntil:
         (waitpid,retcode) = os.wait()    
         print "pid %d is done, retcode %d\n" % (waitpid, retcode)
@@ -27,20 +29,21 @@ def waitforpids(pidlist, waituntil=0):
                 os.kill(killpid,signal.SIGQUIT);
             raise StandardError("Forked process failed for pid %d\n" % waitpid)
 
-#    runcmd is used to make external calls.  
-#    args is a list of what would be space separated arguments, with the convention that
-#    args[0] is the name of the command.  An argument of space separated names should not be quoted
-#
-#    If stdoutname is set, it is assumed that you want to output to a file of that name.
-#    If stdouthandle is set, it is assumed that you want to output to that handle.
-#    Otherwise, this command received stdout back through a pipe and returns it.
-#
-#    On error, this program will throw StandardError with a string containing the stderr return
-#    from the calling program.  Throws may also occur directly from process.POpen (e.g., OSError)            
-#
-#    This program will also return a cmd style facsimile of the command and arguments 
-
 def runcmd(args,env=None,stdoutname=None,stderrname=None,append=True):
+    """
+    runcmd is used to make external calls.  
+    args is a list of what would be space separated arguments, with the convention that
+    args[0] is the name of the command.  An argument of space separated names should not be quoted
+
+    If stdoutname is set, it is assumed that you want to output to a file of that name.
+    If stdouthandle is set, it is assumed that you want to output to that handle.
+    Otherwise, this command received stdout back through a pipe and returns it.
+
+    On error, this program will throw StandardError with a string containing the stderr return
+    from the calling program.  Throws may also occur directly from process.POpen (e.g., OSError)            
+
+    This program will also return a cmd style facsimile of the command and arguments 
+    """
     
     cmdstring = args[0]
     for i in range(1,len(args)):
@@ -179,6 +182,8 @@ def runShear(baseDirs, test=None, forks=1, clobber=1, great3=False, galsim=False
                 fout.write('root.test="%s"\n'%test)
             if not test is None and test[0] == 's':
                 footprintSize = int(test[1:])
+                fout.write('root.measurement.plugins["modelfit_CModel"].region.nGrowFootprint=0\n')
+                fout.write('root.measurement.plugins["modelfit_CModel"].region.nInitialRadii=0\n')
             if not test is None:
                 fout.write('root.test="%s"\n'%test)
             fout.close()

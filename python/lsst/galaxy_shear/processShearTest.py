@@ -84,8 +84,8 @@ class ProcessShearTestTask(ProcessBaseTask):
             doc = "GalSim constant g1 value")
         self.g2Key = self.schema.addField("g2", type = float,
             doc = "GalSim constant g2 value")
-        self.noDetectKey = self.schema.addField("flag_noDetection", type = int,
-            doc = "No 5 sigma detection")
+        self.footprintCountKey = self.schema.addField("footprintCount", type = int,
+            doc = "Number of footprint detected at 5 sigma")
 
     def buildSourceCatalog(self, imageBBox, dataRef):
         """Build an empty source catalog, using the provided sim catalog's position to generate
@@ -199,11 +199,7 @@ class ProcessShearTestTask(ProcessBaseTask):
             x = int(source.getFootprint().getCentroid().getX()+1) - (self.dims.getX()/2)
             y = int(source.getFootprint().getCentroid().getY()+1) - (self.dims.getY()/2)
             bbox = lsst.afw.geom.Box2I(lsst.afw.geom.Point2I(x,y), self.dims)
-            try:
-                exp = lsst.afw.image.ExposureF(exposure, bbox)
-            except:
-                import pdb
-                pdb.set_trace()
+            exp = lsst.afw.image.ExposureF(exposure, bbox)
             exp.setPsf(psf)
             CD = numpy.array([[5.55E-5, 0.0], [0.0, 5.55E-5]])
             crpix = lsst.afw.geom.Point2D(0.0,0.0)
@@ -217,11 +213,13 @@ class ProcessShearTestTask(ProcessBaseTask):
             if self.config.footprintSize is None:
                 try:
                     footprints = lsst.meas.algorithms.SourceDetectionTask().detectFootprints(exp,
-                                 sigma=5.0).positive.getFootprints()
-                    source.setFootprint(footprints[0])
-                    source.set(self.noDetectKey, 0)
+                             sigma=5.0).positive.getFootprints()
+                    source.set(self.footprintCountKey, len(footprints))
+                    if len(footprints > 1):
+                        source.setFootprint(footprints[0])
                 except:
-                    source.set(self.noDetectKey, 1)
+                    source.set(self.footprintCountKey, -1)
+         
 
             #  Now do the measurements, calling the measure algorithms to increase speed
             sigma = None 

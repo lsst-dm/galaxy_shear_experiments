@@ -252,12 +252,11 @@ def runAnal(baseDir, outFile, config, test=None):
     sumSourceCat.writeFits(os.path.join(baseDir, "sum_" + outFile))
 
 if __name__ == "__main__":
-    """
-
-    base_dir         Name of the subdirectory containing run_params file
-    out_file         Name of the catalog for output. .fits is appended
-    test             Name of the test directory, if this is a named test
-    """
+#   analyzeShearTest main program:
+# 
+#   base_dir         Name of the subdirectory containing run_params file
+#   out_file         Name of the catalog for output. .fits is appended
+#   test             Name of the test directory, if this is a named test
 
     parser = argparse.ArgumentParser()
     parser.add_argument("base_dir", type=str, help="Name of the directory containing run_params file")

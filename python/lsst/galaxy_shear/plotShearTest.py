@@ -116,13 +116,12 @@ def runPlot(args):
     plot.show()
 
 if __name__ == "__main__":
-    """
-    This main program reads data for multiple runs in filter, seeing, and shear value, and
 
-    analysis_file         Name of the fits file containing the analysis data
-    seeing                plot only runs with the specified seeing
-    filter                plot only runs with the specified filter
-    """
+#   This main program reads data for multiple runs in filter, seeing, and shear value, and
+#
+#   analysis_file         Name of the fits file containing the analysis data
+#   seeing                plot only runs with the specified seeing
+#   filter                plot only runs with the specified filter
 
     parser = argparse.ArgumentParser()
     parser.add_argument("analysis_file", type=str, help="Analysis fits file")
