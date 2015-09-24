@@ -221,13 +221,15 @@ def runShear(baseDirs, test=None, forks=1, clobber=1, great3=False, galsim=False
         outCat = None
 
         for base in baseDirs:
-            sourceCat = lsst.afw.table.BaseCatalog.readFits(os.path.join(base, "sum_"+outfile))
+            sourceCat = lsst.afw.table.BaseCatalog.readFits(os.path.join(base, "anal_subfield.fits"))
             if outCat is None:
                 outCat = lsst.afw.table.BaseCatalog(sourceCat.getSchema())
-            outCat.append(sourceCat[0])
+            print "catalog for %s has %d rows"%(base, len(sourceCat))
+            outCat.extend(sourceCat)
         print "outCat: ", len(outCat)
         if not outCat is None: 
             outCat.writeFits(os.path.join("sum_"+outfile))
+            print "output catalog %d rows"%len(outCat)
             
 if __name__ == "__main__":
     """

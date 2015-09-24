@@ -43,7 +43,7 @@ This program simply takes the values for a given filter and seeing, fits the poi
 to a line, and graphs the measured values and errors and the regression line.
 """
 
-def runPlot(useFilter=3, useSeeing="0.5", useIndex=None):
+def runPlot(useFilter, useSeeing, useIndex=None):
 
     outSourceCat = afwTable.BaseCatalog.readFits(args.analysis_file)
 
@@ -62,7 +62,8 @@ def runPlot(useFilter=3, useSeeing="0.5", useIndex=None):
     countKey = schema.find("nsource").getKey()
     g1Key = schema.find("g1").getKey()
     g2Key = schema.find("g2").getKey()
-    shear = []
+    g1 = []
+    g2 = []
     e = []
     eStd = []
     e1Avg = []
@@ -71,44 +72,42 @@ def runPlot(useFilter=3, useSeeing="0.5", useIndex=None):
     e2Std = []
     nSources = 0
     # Go through the catalog and get the values requested in the plot
-    for i,rec in enumerate(outSourceCat):
+    for rec in outSourceCat:
         filter = rec.get(filterKey)
         seeing = rec.get(seeingKey)
-        if (filter == useFilter and seeing == useSeeing) or i==useIndex:
-            shear.append(rec.get(shearKey))
-            g1 = rec.get(g1Key)
-            g2 = rec.get(g2Key)
+        if filter == useFilter and seeing == useSeeing:
+            g1.append(rec.get(g1Key))
+            g2.append(rec.get(g2Key))
             nSources = nSources + rec.get(countKey)
             e1Avg.append(rec.get(e1AvgKey))
-            e1Std.append(rec.get(e1StdKey)/10)
+            e1Std.append(rec.get(e1StdKey))
             e2Avg.append(rec.get(e2AvgKey))
-            e2Std.append(rec.get(e2StdKey)/10)
+            e2Std.append(rec.get(e2StdKey))
             print "Stddev e1, e2: ", rec.get(e1StdKey), rec.get(e2StdKey)
             #print rec.get(eAvgKey), rec.get(e1AvgKey), rec.get(e2AvgKey)
             #print rec.get(eStdKey), rec.get(e1StdKey), rec.get(e2StdKey)
-    shear = numpy.array(shear, dtype=float)
-    e = numpy.array(e, dtype=float)
+    g1 = numpy.array(g1, dtype=float)
+    g2 = numpy.array(g2, dtype=float)
     eStd = numpy.array(eStd, dtype=float)
     e1Avg = numpy.array(e1Avg, dtype=float)
     e1Std = numpy.array(e1Std, dtype=float)
     e2Avg = numpy.array(e2Avg, dtype=float)
     e2Std = numpy.array(e2Std, dtype=float)
     
-    #m, b = numpy.polyfit(shear[1:], e[1:], 1)
-    m1, b1 = numpy.polyfit(shear, e1Avg, 1)
-    m2, b2 = numpy.polyfit(shear, e2Avg, 1)
-    label = "%d gals, f%d_%.1f, e1m: %.4f b: %.4f) e2m: %.4f b:%.4f)"%(nSources, filter, seeing, m1, m2, b1, b2)
+    m1, b1 = numpy.polyfit(g1, e1Avg, 1)
+    m2, b2 = numpy.polyfit(g2, e2Avg, 1)
+    label = "%d gals, f%d_%.1f, e1m: %.4f b: %.4f) e2m: %.4f b:%.4f)"%(nSources, filter, seeing, m1, b1, m2, b2)
     figure = plot.figure()
     figure.suptitle(label)
     ax = figure.add_subplot(111)
     ax.set_xlabel("applied shear")
     ax.set_ylabel("measured shear")
     # plot the data with error bars
-    ax.errorbar(shear, e1Avg, yerr=e1Std, marker = "o", linestyle='None', label =label)
-    ax.errorbar(shear, e2Avg, yerr=e2Std, marker = "o", linestyle='None', label =label)
+    ax.errorbar(g1, e1Avg, yerr=e1Std, marker = "o", linestyle='None', label =label, color='red')
+    ax.errorbar(g2, e2Avg, yerr=e2Std, marker = "o", linestyle='None', label =label)
     # plot a first order fit
-    ax.plot(shear, m1*shear + b1)
-    ax.plot(shear, m2*shear + b2)
+    ax.plot(g1, m1*g1 + b1)
+    ax.plot(g2, m2*g2 + b2)
     plot.show()
 
 if __name__ == "__main__":
@@ -122,8 +121,8 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("analysis_file", type=str, help="Analysis fits file")
-    parser.add_argument("-f", "--filter", type=int, help="filter to be used for plotting", default=None)
+    parser.add_argument("-f", "--filter", type=int, help="filter to be used for plotting", default=3)
     parser.add_argument("-b", "--index", type=int, help="indexs of filter to be used for plotting", default=None)
-    parser.add_argument("-s", "--seeing", type=float, help="seeing to be used for plotting", default=None)
+    parser.add_argument("-s", "--seeing", type=float, help="seeing to be used for plotting", default=0.5)
     args = parser.parse_args()
-    runPlot(useFilter=args.filter, useSeeing=args.seeing, useIndex=0)
+    runPlot(args.filter, args.seeing, useIndex=None)
