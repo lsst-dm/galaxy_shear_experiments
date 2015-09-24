@@ -254,7 +254,6 @@ def runAnal(baseDir, outFile, config, test=None):
 
 if __name__ == "__main__":
 #   analyzeShearTest main program:
-#
 #   base_dir         Name of the subdirectory containing run_params file
 #   out_file         Name of the catalog for output. .fits is appended
 #   test             Name of the test directory, if this is a named test

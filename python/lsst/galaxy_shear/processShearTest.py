@@ -223,6 +223,7 @@ class ProcessShearTestTask(ProcessBaseTask):
             #  Add a real footprint unless a rectangular footprint has been requested
             if self.config.footprintSize is None:
                 try:
+<<<<<<< HEAD
                     task = lsst.meas.algorithms.SourceDetectionTask()
                     footprints = task.detectFootprints(exp,
                              sigma=4.0).positive.getFootprints()
@@ -244,6 +245,16 @@ class ProcessShearTestTask(ProcessBaseTask):
                 bbox = lsst.afw.geom.Box2I(lsst.afw.geom.Point2I(x,y),
                            lsst.afw.geom.Extent2I(self.config.stampSize, self.config.stampSize))
                 exp = lsst.afw.image.ExposureF(exp, bbox)
+=======
+                    footprints = lsst.meas.algorithms.SourceDetectionTask().detectFootprints(exp,
+                             sigma=5.0).positive.getFootprints()
+                    source.set(self.footprintCountKey, len(footprints))
+                    if len(footprints > 1):
+                        source.setFootprint(footprints[0])
+                except:
+                    source.set(self.footprintCountKey, -1)
+         
+>>>>>>> 1230a092490021ec62944106d7ef81dc36453bf0
 
             #  Now do the measurements, calling the measure algorithms to increase speed
             sigma = None 
