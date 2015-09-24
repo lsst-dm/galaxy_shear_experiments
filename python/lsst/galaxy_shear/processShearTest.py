@@ -52,7 +52,13 @@ class ProcessShearTestConfig(ProcessBaseConfig):
         dtype=int,
         default=None,
         optional=True,
-        doc="size of footprint, if fixed" 
+        doc="size of footprint, if a square is used" 
+    )
+    stampSize = lsst.pex.config.Field(
+        dtype=int,
+        default=None,
+        optional=True,
+        doc="size of cutout, if reduction is desired" 
     )
     noClobber = lsst.pex.config.Field(
         dtype=bool,
@@ -73,19 +79,26 @@ class ProcessShearTestTask(ProcessBaseTask):
 
     def __init__(self, **kwds):
         ProcessBaseTask.__init__(self, **kwds)
+        self.xKey = self.schema.addField("x", type = float,
+            doc = "x position from epoch catalog")
+        self.yKey = self.schema.addField("y", type = float,
+            doc = "y position from epoch catalog")
         self.psfLibraryKey = self.schema.addField("psf_library",
             type = int, doc = "number of psf library")
         self.psfIndexKey = self.schema.addField("psf_index",
             type = int, doc = "index of psf within library")
         self.psfNumberKey = self.schema.addField("psf_number",
             type = int, doc = "number of psf_nnnn.fits")
-
+        self.bulgeThetaKey = self.schema.addField("bulge_theta", type = float,
+            doc = "bulge rotation angle")
+        self.diskThetaKey = self.schema.addField("disk_theta", type = float,
+            doc = "disk rotation angle")
         self.g1Key = self.schema.addField("g1", type = float,
             doc = "GalSim constant g1 value")
         self.g2Key = self.schema.addField("g2", type = float,
             doc = "GalSim constant g2 value")
-        self.noDetectKey = self.schema.addField("flag_noDetection", type = int,
-            doc = "No 5 sigma detection")
+        self.footprintCountKey = self.schema.addField("footprintCount", type = int,
+            doc = "Number of footprint detected at 5 sigma")
 
     def buildSourceCatalog(self, imageBBox, dataRef):
         """Build an empty source catalog, using the provided sim catalog's position to generate
@@ -127,21 +140,19 @@ class ProcessShearTestTask(ProcessBaseTask):
         offset = lsst.afw.geom.Extent2I(simCat[0][xKey], simCat[0][yKey])
         for simRecord in simCat:
             sourceRecord = sourceCat.addNew()
+            sourceRecord.set(self.xKey, simRecord.get(xKey))
+            sourceRecord.set(self.yKey, simRecord.get(yKey))
             sourceRecord.setId(simRecord.get(idKey))
             sourceRecord.set(self.psfIndexKey, simRecord.get("psf_index"))
             sourceRecord.set(self.psfLibraryKey, simRecord.get("psf_library"))
             sourceRecord.set(self.psfNumberKey, simRecord.get("psf_number"))
+            sourceRecord.set(self.bulgeThetaKey, simRecord.get("bulge_beta_radians"))
+            sourceRecord.set(self.diskThetaKey, simRecord.get("disk_beta_radians"))
             sourceRecord.set(self.g1Key, simRecord.get("g1"))
             sourceRecord.set(self.g2Key, simRecord.get("g2"))
             position = lsst.afw.geom.Point2I(simRecord.get(xKey), simRecord.get(yKey))
-            footprintSize = self.config.footprintSize
-            # if the footprintSize is set, use it as the dimension of the bounding box
-            if not footprintSize is None:
-                offset = lsst.afw.geom.Extent2I((footprintSize/2)-1, (footprintSize/2)-1)
-                dims = lsst.afw.geom.Extent2I(footprintSize, footprintSize)
-            else:
-                dims = self.dims
-            bbox = lsst.afw.geom.Box2I(position - offset, dims)
+            # the default footprint is the entire rectangle produced by GalSim
+            bbox = lsst.afw.geom.Box2I(position - offset, self.dims)
             footprint = lsst.afw.detection.Footprint(bbox, imageBBox)
             peakRecord = footprint.getPeaks().addNew()
             peakRecord.setFx(position.getX())
@@ -157,6 +168,7 @@ class ProcessShearTestTask(ProcessBaseTask):
         task, instead calling the plugins directly to improve speed and remove
         noise replacement.
         """
+        print dataRef.dataId
         # The noClobber flag protects data which was already run from deletion
         if self.config.noClobber:
             if not self.config.test is None:
@@ -199,11 +211,7 @@ class ProcessShearTestTask(ProcessBaseTask):
             x = int(source.getFootprint().getCentroid().getX()+1) - (self.dims.getX()/2)
             y = int(source.getFootprint().getCentroid().getY()+1) - (self.dims.getY()/2)
             bbox = lsst.afw.geom.Box2I(lsst.afw.geom.Point2I(x,y), self.dims)
-            try:
-                exp = lsst.afw.image.ExposureF(exposure, bbox)
-            except:
-                import pdb
-                pdb.set_trace()
+            exp = lsst.afw.image.ExposureF(exposure, bbox)
             exp.setPsf(psf)
             CD = numpy.array([[5.55E-5, 0.0], [0.0, 5.55E-5]])
             crpix = lsst.afw.geom.Point2D(0.0,0.0)
@@ -212,16 +220,30 @@ class ProcessShearTestTask(ProcessBaseTask):
             calib = lsst.afw.image.Calib()
             calib.setFluxMag0((3531360874589.57, 21671681149.139))
             exp.setCalib(calib)
-
-            #  Add a real footprint
+            #  Add a real footprint unless a rectangular footprint has been requested
             if self.config.footprintSize is None:
                 try:
-                    footprints = lsst.meas.algorithms.SourceDetectionTask().detectFootprints(exp,
-                                 sigma=5.0).positive.getFootprints()
+                    task = lsst.meas.algorithms.SourceDetectionTask()
+                    footprints = task.detectFootprints(exp,
+                             sigma=4.0).positive.getFootprints()
                     source.setFootprint(footprints[0])
-                    source.set(self.noDetectKey, 0)
+                    source.set(self.footprintCountKey, len(footprints))
                 except:
-                    source.set(self.noDetectKey, 1)
+                    source.set(self.footprintCountKey, -1)
+            #  else make the footprint a square of the requested size
+            else:
+                bbox = source.getFootprint().getBBox()
+                shrinkAmount = (bbox.getDimensions().getX() - self.config.footprintSize)/2 
+                bbox.grow(-shrinkAmount)
+                source.getFootprint().clipTo(bbox)
+
+            #  shrink the bounds of the exposure if requested:
+            if not self.config.stampSize is None:
+                x = int(source.getFootprint().getCentroid().getX()+1) - (self.config.stampSize/2)
+                y = int(source.getFootprint().getCentroid().getY()+1) - (self.config.stampSize/2)
+                bbox = lsst.afw.geom.Box2I(lsst.afw.geom.Point2I(x,y),
+                           lsst.afw.geom.Extent2I(self.config.stampSize, self.config.stampSize))
+                exp = lsst.afw.image.ExposureF(exp, bbox)
 
             #  Now do the measurements, calling the measure algorithms to increase speed
             sigma = None 

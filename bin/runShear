@@ -1,0 +1,2 @@
+#!/usr/bin/tcsh
+python $GALAXY_SHEAR_EXPERIMENTS_DIR/python/lsst/galaxy_shear/runShear.py $*

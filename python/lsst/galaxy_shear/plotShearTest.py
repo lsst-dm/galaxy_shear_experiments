@@ -43,7 +43,7 @@ This program simply takes the values for a given filter and seeing, fits the poi
 to a line, and graphs the measured values and errors and the regression line.
 """
 
-def runPlot(args):
+def runPlot(useFilter=3, useSeeing="0.5", useIndex=None):
 
     outSourceCat = afwTable.BaseCatalog.readFits(args.analysis_file)
 
@@ -51,13 +51,13 @@ def runPlot(args):
     schema = outSourceCat.getSchema()
     filterKey = schema.find("filter").getKey()
     seeingKey = schema.find("seeing").getKey()
-    shearKey = schema.find("shear").getKey()
+    shearKey = schema.find("shear_value").getKey()
     nsourceKey = schema.find("nsource").getKey()
     eAvgKey = schema.find("eAvg").getKey()
     eStdKey = schema.find("eStd").getKey()
-    e1DevKey = schema.find("e1Dev").getKey()
+    e1AvgKey = schema.find("e1Avg").getKey()
     e1StdKey = schema.find("e1Std").getKey()
-    e2DevKey = schema.find("e2Dev").getKey()
+    e2AvgKey = schema.find("e2Avg").getKey()
     e2StdKey = schema.find("e2Std").getKey()
     countKey = schema.find("nsource").getKey()
     g1Key = schema.find("g1").getKey()
@@ -65,52 +65,48 @@ def runPlot(args):
     shear = []
     e = []
     eStd = []
-    e1Dev = []
+    e1Avg = []
     e1Std = []
-    e2Dev = []
+    e2Avg = []
     e2Std = []
     nSources = 0
     # Go through the catalog and get the values requested in the plot
-    for rec in outSourceCat:
+    for i,rec in enumerate(outSourceCat):
         filter = rec.get(filterKey)
         seeing = rec.get(seeingKey)
-        if filter == args.filter and seeing == args.seeing:
+        if (filter == useFilter and seeing == useSeeing) or i==useIndex:
             shear.append(rec.get(shearKey))
             g1 = rec.get(g1Key)
             g2 = rec.get(g2Key)
-            e.append(rec.get(eAvgKey))
-            eStd.append(rec.get(eStdKey))
-            e1Dev.append(g1 + rec.get(e1DevKey)/.6215)
-            e1Std.append(rec.get(e1StdKey))
-            e2Dev.append(g2 + rec.get(e2DevKey)/.6215)
-            e2Std.append(rec.get(e2StdKey))
             nSources = nSources + rec.get(countKey)
-            print rec.get(eAvgKey), rec.get(e1DevKey), rec.get(e2DevKey)
+            e1Avg.append(rec.get(e1AvgKey))
+            e1Std.append(rec.get(e1StdKey)/10)
+            e2Avg.append(rec.get(e2AvgKey))
+            e2Std.append(rec.get(e2StdKey)/10)
+            print "Stddev e1, e2: ", rec.get(e1StdKey), rec.get(e2StdKey)
+            #print rec.get(eAvgKey), rec.get(e1AvgKey), rec.get(e2AvgKey)
             #print rec.get(eStdKey), rec.get(e1StdKey), rec.get(e2StdKey)
-            print "-------------------------"
     shear = numpy.array(shear, dtype=float)
     e = numpy.array(e, dtype=float)
     eStd = numpy.array(eStd, dtype=float)
-    e1Dev = numpy.array(e1Dev, dtype=float)
+    e1Avg = numpy.array(e1Avg, dtype=float)
     e1Std = numpy.array(e1Std, dtype=float)
-    e2Dev = numpy.array(e2Dev, dtype=float)
+    e2Avg = numpy.array(e2Avg, dtype=float)
     e2Std = numpy.array(e2Std, dtype=float)
     
-    m, b = numpy.polyfit(shear[1:], e[1:], 1)
-    m1, b1 = numpy.polyfit(shear, e1Dev, 1)
-    m2, b2 = numpy.polyfit(shear, e2Dev, 1)
-    label = "%d, seeing %.1f, m = %.4f %.4f, %.4f, b = %.4f %.4f %.4f"%(nSources, seeing, m, m1, m2, b, b1, b2)
+    #m, b = numpy.polyfit(shear[1:], e[1:], 1)
+    m1, b1 = numpy.polyfit(shear, e1Avg, 1)
+    m2, b2 = numpy.polyfit(shear, e2Avg, 1)
+    label = "%d gals, f%d_%.1f, e1m: %.4f b: %.4f) e2m: %.4f b:%.4f)"%(nSources, filter, seeing, m1, m2, b1, b2)
     figure = plot.figure()
     figure.suptitle(label)
     ax = figure.add_subplot(111)
     ax.set_xlabel("applied shear")
     ax.set_ylabel("measured shear")
     # plot the data with error bars
-    ax.errorbar(shear, e, yerr=eStd/math.sqrt(len(outSourceCat)-1), marker = "o", linestyle='None', label =label)
-    ax.errorbar(shear, e1Dev, yerr=e1Std/math.sqrt(len(outSourceCat)), marker = "o", linestyle='None', label =label)
-    ax.errorbar(shear, e2Dev, yerr=e2Std/math.sqrt(len(outSourceCat)), marker = "o", linestyle='None', label =label)
+    ax.errorbar(shear, e1Avg, yerr=e1Std, marker = "o", linestyle='None', label =label)
+    ax.errorbar(shear, e2Avg, yerr=e2Std, marker = "o", linestyle='None', label =label)
     # plot a first order fit
-    ax.plot(shear, m*shear + b)
     ax.plot(shear, m1*shear + b1)
     ax.plot(shear, m2*shear + b2)
     plot.show()
@@ -126,7 +122,8 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("analysis_file", type=str, help="Analysis fits file")
-    parser.add_argument("-f", "--filter", type=int, help="filter to be used for plotting", default=2)
-    parser.add_argument("-s", "--seeing", type=float, help="seeing to be used for plotting", default=0.7)
+    parser.add_argument("-f", "--filter", type=int, help="filter to be used for plotting", default=None)
+    parser.add_argument("-b", "--index", type=int, help="indexs of filter to be used for plotting", default=None)
+    parser.add_argument("-s", "--seeing", type=float, help="seeing to be used for plotting", default=None)
     args = parser.parse_args()
-    runPlot(args)
+    runPlot(useFilter=args.filter, useSeeing=args.seeing, useIndex=0)

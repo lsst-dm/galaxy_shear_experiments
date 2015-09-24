@@ -1,0 +1,4 @@
+#!/usr/bin/tcsh
+# Script to run analysis over a directory
+# runAnal
+python $GALAXY_SHEAR_EXPERIMENTS_DIR/python/lsst/galaxy_shear/plotShearTest.py $1

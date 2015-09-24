@@ -1,0 +1,6 @@
+#!/usr/bin/tcsh
+setenv outdir $1
+setenv test $2
+date
+python $GALAXY_SHEAR_EXPERIMENTS_DIR/bin/processShearTest.py $outdir/control/ground/constant --configfile=my.py --id subfield=0..0 epoch=0..0 --output $outdir/control/ground/constant/$test
+date
