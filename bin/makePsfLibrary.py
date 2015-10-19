@@ -110,8 +110,10 @@ def makeSubLibrary(images, catname, output_file, fout, psfSize=33, satValue=None
                 starInfo["footprintCnt"] = footprintCnt
                 if footprintCnt == 0 or footprintCnt > 1:
                     starInfo["footprints"] = footprintCnt
+                    continue
                 if len(ds.getFootprints()[0].getPeaks()) == 0:
                     starInfo["peaks"] = True
+                    continue
                 #   Check the peak value if satValue is set
                 peakValue = ds.getFootprints()[0].getPeaks()[0].getPeakValue()
                 if not satValue is None and peakValue >= satValue:
