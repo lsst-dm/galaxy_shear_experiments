@@ -68,7 +68,7 @@ def runAnal(baseDir, outFile, config, test=None):
 
     e2AvgKey = schema.addField("e2Avg", type = float, doc = "e2 deviation from g2, for nsub subfields")
     e2StdKey = schema.addField("e2Std", type = float, doc = "stddev e for the sources in this subfield")
-    outSubfieldCat = afwTable.BaseCatalog(schema)
+    outCat = afwTable.BaseCatalog(schema)
 
     #   The shape type can be "moments" or "ellipticity"
     #   If we done have an e_sigma, the signal field  tells us to extract the weighting function
@@ -97,6 +97,8 @@ def runAnal(baseDir, outFile, config, test=None):
     butler = dafPersist.Butler(root=os.path.join(baseDir, config.exp_type + "/ground/constant"))
 
     count = 0
+    nanCount = 0
+    allCount = 0
     eAvgSum = 0.0
     e1AvgSum = 0.0
     e2AvgSum = 0.0
@@ -105,6 +107,9 @@ def runAnal(baseDir, outFile, config, test=None):
     e2AvgSumSq = 0.0
     weightSum = 0.0
     nAvgs = 0
+    flagKeys = []
+    flagNames = []
+    flagCount = []
     for subfield in range(config.n_subfields):
         for epoch in range(config.n_epochs):
             catCount = 0
@@ -119,6 +124,13 @@ def runAnal(baseDir, outFile, config, test=None):
                 sourceCat = butler.get("test_src", {'subfield':subfield, 'epoch':epoch, 'test': test})
             else:
                 sourceCat = butler.get("src", {'subfield':subfield, 'epoch':epoch})
+            # make a list of all the error flags
+            if len(flagCount) == 0:
+                for name in sourceCat.getSchema().getNames():
+                    if name.find("_flag") > 0:
+                        flagKeys.append(sourceCat.getSchema().find(name).getKey())
+                        flagCount.append(0)
+                        flagNames.append(name)
             if len(sourceCat) > 0:
                 g1 = sourceCat[0].get("g1")
                 g2 = sourceCat[0].get("g2")
@@ -147,6 +159,9 @@ def runAnal(baseDir, outFile, config, test=None):
 
             #   Now loop through the catalog and summarize the ellipticity measurements
             for source in sourceCat:
+                for i, key in enumerate(flagKeys):
+                    if source.get(key):
+                        flagCount[i] = flagCount[i] + 1
                 if shape_type == "ellipticity":
                     e1 = source.get(e1Key)
                     e2 = source.get(e2Key)
@@ -170,38 +185,36 @@ def runAnal(baseDir, outFile, config, test=None):
                         sigmaSignal = source.get(sigmaSignalKey)
                         sigma = sigma * e / sigmaSignal
                     weight = 1.0/(.25*.25 + sigma*sigma)
-
                 #   Discard nans
                 if not e >= 0 and not e <= 0:
-                    continue
-                catWeightSum = catWeightSum + weight
-                catESum = catESum + (e * weight)
-                catE1Sum = catE1Sum + (e1 * weight)
-                catE2Sum = catE2Sum + (e2 * weight)
-                catESumSq = catESumSq + (e * e * weight)
-                catE1SumSq = catE1SumSq + (e1 * e2 * weight)
-                catE2SumSq = catE2SumSq + (e1 * e2 * weight)
-                catCount = catCount + 1
-
+                    nanCount = nanCount + 1 
+                else:
+                    catWeightSum = catWeightSum + weight
+                    catESum = catESum + (e * weight)
+                    catE1Sum = catE1Sum + (e1 * weight)
+                    catE2Sum = catE2Sum + (e2 * weight)
+                    catESumSq = catESumSq + (e * e * weight)
+                    catE1SumSq = catE1SumSq + (e1 * e1 * weight)
+                    catE2SumSq = catE2SumSq + (e2 * e2 * weight)
+                    catCount = catCount + 1
             #   For each subfield/epoch, calculate averages
             if catWeightSum > 0:
                  e1Avg = catE1Sum/catWeightSum
                  e2Avg = catE2Sum/catWeightSum
                  eAvg = catESum/catWeightSum
-                 e1Stddev = catE1SumSq/catWeightSum - e1Avg*e1Avg
-                 e2Stddev = catE2SumSq/catWeightSum - e2Avg*e2Avg
-                 eStddev = catESumSq/catWeightSum - eAvg*eAvg
-                 print "%d galaxies: e=%.4f +-%.4f, e1=%.4f +-%.4f, e2=%.4f +-%.4f, g=%.3f, (%.3f,%.3f)"%(catCount,
-                        eAvg, eStddev, e1Avg, e1Stddev, e2Avg, e2Stddev,
+                 e1Stddev = math.sqrt(catE1SumSq/catWeightSum - e1Avg*e1Avg)/math.sqrt(catWeightSum)
+                 e2Stddev = math.sqrt(catE2SumSq/catWeightSum - e2Avg*e2Avg)/math.sqrt(catWeightSum)
+                 eStddev = math.sqrt(catESumSq/catWeightSum - eAvg*eAvg)
+                 print "%d galaxies weight %f.2: e1=%.4f +-%.4f, e2=%.4f +-%.4f, g=%.3f, (%.3f,%.3f)"%(catCount,
+                        catWeightSum, e1Avg, e1Stddev, e2Avg, e2Stddev,
                         math.sqrt(g1*g1 + g2*g2), g1, g2)
 
                  #   And append to the output fits file
-                 outrec = outSubfieldCat.addNew()
+                 outrec = outCat.addNew()
                  outrec.set(g1Key, float(g1))
                  outrec.set(g2Key, float(g2))
                  outrec.set(filterKey, config.filter)
                  outrec.set(seeingKey, config.seeing)
-                 outrec.set(shearValueKey, config.shear_value)
                  outrec.set(countKey, catCount)
                  outrec.set(gKey, math.sqrt(g1*g1 + g2*g2))
                  outrec.set(eAvgKey, eAvg)
@@ -220,37 +233,13 @@ def runAnal(baseDir, outFile, config, test=None):
                  e2AvgSum = e2AvgSum + e2Avg
                  e2AvgSumSq = e2AvgSumSq + e2Avg*e2Avg
                  count = count + catCount
+                 allCount = allCount + len(sourceCat)
                  weightSum = weightSum + catWeightSum
-    outSubfieldCat.writeFits(os.path.join(baseDir, "anal_subfield.fits"))
-    #   Now summarize the averages and stddevs for all the subfield/epochs
-    if nAvgs > 1:
-        eStddev = math.sqrt( (nAvgs * eAvgSumSq - eAvgSum * eAvgSum)/(nAvgs * (nAvgs - 1)))
-        e1Stddev = math.sqrt((nAvgs * e1AvgSumSq - e1AvgSum * e1AvgSum)/(nAvgs * (nAvgs - 1)))
-        e2Stddev = math.sqrt((nAvgs * e2AvgSumSq - e2AvgSum * e2AvgSum)/(nAvgs * (nAvgs - 1)))
-        eAvg = eAvgSum/nAvgs
-        e1Avg = e1AvgSum/nAvgs
-        e2Avg = e2AvgSum/nAvgs
-
-    print "%d subfields: e=%.4f +-%.4f, e1=%.4f +-%.4f, e2=%.4f +-%.4f, g=%.3f, (%.3f,%.3f)"%(nAvgs,
-           eAvg, eStddev, e1Avg, e1Stddev, e2Avg, e2Stddev,
-           math.sqrt(g1*g1 + g2*g2), g1, g2)
-
-    sumSourceCat = afwTable.BaseCatalog(outSubfieldCat.getSchema())
-    sumrec = sumSourceCat.addNew()
-    sumrec.set(g1Key, float(g1))
-    sumrec.set(g2Key, float(g2))
-    sumrec.set(filterKey, config.filter)
-    sumrec.set(seeingKey, config.seeing)
-    sumrec.set(shearValueKey, config.shear_value)
-    sumrec.set(countKey, count)
-    sumrec.set(gKey, math.sqrt(g1*g1 + g2*g2))
-    sumrec.set(eAvgKey, eAvg)
-    sumrec.set(eStdKey, eStddev)
-    sumrec.set(e1AvgKey, e1Avg)
-    sumrec.set(e1StdKey, e1Stddev)
-    sumrec.set(e2AvgKey, e2Avg)
-    sumrec.set(e2StdKey, e2Stddev)
-    sumSourceCat.writeFits(os.path.join(baseDir, "sum_" + outFile))
+    outCat.writeFits(os.path.join(baseDir, outFile))
+    print "Total from all subfields: %d measured out of %d, %d had a nan measuremnt"%(count, allCount, nanCount)
+    for i in range(len(flagCount)):
+        if flagCount[i] > 0:
+            print flagNames[i], ": ", flagCount[i]
 
 if __name__ == "__main__":
 #   analyzeShearTest main program:
@@ -266,11 +255,11 @@ if __name__ == "__main__":
     args = parser.parse_args()
     if args.out_file is None:
         if args.test is None:
-            out_file = "subfields_" + args.test + ".fits"
-        else:
             out_file = "subfields.fits"
+        else:
+            out_file = "subfields_" + args.test + ".fits"
 
     #   open the config file for this run
     config = RunShearConfig()
-    config.load(os.path.join(base_dir, "shear.config"))
+    config.load(os.path.join(args.base_dir, "shear.config"))
     runAnal(args.base_dir, out_file, config, test=args.test)
