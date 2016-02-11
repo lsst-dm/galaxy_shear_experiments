@@ -23,6 +23,9 @@
 
 import math
 import numpy
+import os
+import time
+import multiprocessing
 import lsst.daf.base
 import lsst.pex.config
 import lsst.pipe.base
@@ -31,8 +34,9 @@ import lsst.afw.image
 import lsst.afw.math
 import lsst.meas.algorithms
 import lsst.meas.base
-from lsst.meas.base.base import MeasurementError
-from lsst.meas.base.base import FATAL_EXCEPTIONS
+from lsst.meas.base.baseLib import MeasurementError
+from lsst.meas.base.baseMeasurement import FATAL_EXCEPTIONS
+import lsst.obs.great3
 from lsst.obs.great3.processBase import *
 
 class ProcessShearTestConfig(ProcessBaseConfig):
@@ -99,6 +103,18 @@ class ProcessShearTestTask(ProcessBaseTask):
             doc = "GalSim constant g2 value")
         self.footprintCountKey = self.schema.addField("footprintCount", type = int,
             doc = "Number of footprint detected at 5 sigma")
+
+    def saveUniqueConfigFile(self, outdir=None):
+        template = "processShearTest.config.%d"
+        if not outdir is None:
+            template = os.path.join(outdir, template)
+        number =1
+        while True:
+            if not os.path.isfile(template%number):
+                if number == 1 or (time.time() - os.path.getctime(template%(number-1)) > 600):
+                    self.config.save(template%number)
+                return
+            number = number + 1
 
     def buildSourceCatalog(self, imageBBox, dataRef):
         """Build an empty source catalog, using the provided sim catalog's position to generate
@@ -168,7 +184,7 @@ class ProcessShearTestTask(ProcessBaseTask):
         task, instead calling the plugins directly to improve speed and remove
         noise replacement.
         """
-        print dataRef.dataId
+        self.saveUniqueConfigFile()
         # The noClobber flag protects data which was already run from deletion
         if self.config.noClobber:
             if not self.config.test is None:
@@ -191,22 +207,29 @@ class ProcessShearTestTask(ProcessBaseTask):
             g1 = sourceCat[0].get(self.g1Key)
             g2 = sourceCat[0].get(self.g2Key)
             theta0 = 180.0*math.atan2(g2,g1)/2.0*math.pi
-
+        xKey = sourceCat.getSchema().find('base_GaussianCentroid_x').getKey()
+        yKey = sourceCat.getSchema().find('base_GaussianCentroid_y').getKey()
+        last_psf_library = None
+        last_psf_number = None
+        # Dictionary of keys for Psf Modeling Fields
+        psfApproxKeys = sourceCat.getSchema().extract("*modelfit_ShapeletPsfApprox*").keys()
+        psfMasterRecord = None
         for source in sourceCat:
             #   Locate the psb_library and get the indexed psf
-            dataRef.dataId["psf_index"] = source.get("psf_index")
-            dataRef.dataId["psf_library"] = source.get("psf_library")
-            dataRef.dataId["psf_number"] = source.get("psf_number")
-            if dataRef.datasetExists("psf_file"):
-                psf_file = dataRef.get("psf_file", immediate=True)
-            else:
-                print "loading Library %d, for psfnumber %d"%(source.get("psf_library"),
-                    source.get("psf_number"))
+            if not last_psf_library == source.get("psf_library") or not last_psf_number == source.get("psf_number"): 
+                dataRef.dataId["psf_index"] = source.get("psf_index")
+                dataRef.dataId["psf_library"] = source.get("psf_library")
+                dataRef.dataId["psf_number"] = source.get("psf_number")
+                if dataRef.datasetExists("psf_file"):
+                    psf_file = dataRef.get("psf_file", immediate=True)
+                else:
+                    print "loading Library %d, for psfnumber %d"%(source.get("psf_library"),
+                        source.get("psf_number"))
+                    psf_file = dataRef.get("psf_library", immediate=True)
+                data = psf_file.getArray().astype(numpy.float64)
+                kernel = lsst.afw.math.FixedKernel(lsst.afw.image.ImageD(data))
+                psf = lsst.meas.algorithms.KernelPsf(kernel)
 
-                psf_file = dataRef.get("psf_library", immediate=True)
-            data = psf_file.getArray().astype(numpy.float64)
-            kernel = lsst.afw.math.FixedKernel(lsst.afw.image.ImageD(data))
-            psf = lsst.meas.algorithms.KernelPsf(kernel)
             # Create a bounding box around the galaxy image of self.dims
             x = int(source.getFootprint().getCentroid().getX()+1) - (self.dims.getX()/2)
             y = int(source.getFootprint().getCentroid().getY()+1) - (self.dims.getY()/2)
@@ -261,17 +284,28 @@ class ProcessShearTestTask(ProcessBaseTask):
                 exp = lsst.afw.image.ExposureF(exp, bbox)
 
             #  Now do the measurements, calling the measure algorithms to increase speed
-            sigma = None 
+            sigma = None
+            if count % 10 == 0:
+                self.log.warn("subfield %d, count = %d"%(dataRef.dataId["subfield"], count))
+            count = count + 1
             try:
                 for plugin in self.measurement.plugins.keys():
+                    if plugin.find("modelfit_ShapeletPsfApprox") >= 0 and not psfMasterRecord is None:
+                        for key in psfApproxKeys:
+                            source.set(key, psfMasterRecord.get(key))
+                        continue 
                     self.measurement.plugins[plugin].measure(source, exp)
+                if psfMasterRecord is None:
+                    psfMasterRecord = source
+                    self.log.warn("setting psfMasterRecord")
+                    
             except FATAL_EXCEPTIONS:
                 raise
             except MeasurementError as error:
                 self.measurement.plugins[plugin].fail(source, error)
             except Exception as error:
                 self.log.warn("Error in %s.measure on record %s: %s"
-                              % (self.measurement.plugins[plugin].name, source.getId(), error))
+                          % (self.measurement.plugins[plugin].name, source.getId(), error))
             if not self.e1Key is None:
                 e1 = source.get(self.e1Key)
                 e2 = source.get(self.e2Key)
@@ -303,14 +337,14 @@ class ProcessShearTestTask(ProcessBaseTask):
                                help="data ID, e.g. --id subfield=0")
         return parser
 
-    def writeConfig(self, butler, clobber=False):
+    def writeConfig(self, butler, clobber=False, doBackup=False):
         pass
 
-    def writeSchemas(self, butler, clobber=False):
+    def writeSchemas(self, butler, clobber=False, doBackup=False):
         pass
 
-    def writeMetadata(self, dataRef):
+    def writeMetadata(self, dataRef, doBackup=False):
         pass
 
-    def writeEupsVersions(self, butler, clobber=False):
+    def writeEupsVersions(self, butler, clobber=False, doBackup=False):
         pass

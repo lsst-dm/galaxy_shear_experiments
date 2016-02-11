@@ -43,7 +43,7 @@ This program simply takes the values for a given filter and seeing, fits the poi
 to a line, and graphs the measured values and errors and the regression line.
 """
 
-def runPlot(analysis_file, useFilter, useSeeing, useIndex=None, display=1):
+def runPlot(analysis_file, useFilter, useSeeing, useIndex=None, display=1, fhist=None):
 
     # input file is the analyis of a set of subfields, all from the same measurement run
     subfieldCat = afwTable.BaseCatalog.readFits(analysis_file)
@@ -98,7 +98,7 @@ def runPlot(analysis_file, useFilter, useSeeing, useIndex=None, display=1):
             x2 = rec.get(g2Key)
             g2.append(x2)
             nSources = nSources + rec.get(countKey)
-
+            fhist.write("%.5f %.5f\n"%(x1,x2))
             # each subfield catalog contains and estimated mean and std error of the mean for e1 and e2
             y1 = rec.get(e1AvgKey)
             sigma1 = rec.get(e1StdKey)
@@ -180,13 +180,17 @@ if __name__ == "__main__":
     parser.add_argument("-f", "--filter", type=int, help="filter to be used for plotting", default=None)
     parser.add_argument("-b", "--index", type=int, help="index of filter to be used for plotting", default=None)
     parser.add_argument("-s", "--seeing", type=float, help="seeing to be used for plotting", default=None)
-    parser.add_argument("-d", "--display", type=str, help="display the resulting plot", default=1)
+    parser.add_argument("-d", "--display", type=int, help="display the resulting plot", default=1)
     args = parser.parse_args()
 
     #  If this is must a single analysis file, just display the fit
     if args.test is None:
-        nPoints, m1, m1err, b1, b1err, m2, m2err, b2, b2err = runPlot(args.analysis_file, args.filter, args.seeing, useIndex=None, display=args.display)
-    
+        fhist = open("gvals.outs", "w")
+        fhist.write("# fiat 1.0\n")
+        fhist.write("# ttype1 = g1\n")
+        fhist.write("# ttype2 = g1\n")
+        nPoints, m1, m1err, b1, b1err, m2, m2err, b2, b2err = runPlot(args.analysis_file, args.filter, args.seeing, useIndex=None, display=args.display, fhist=fhist)
+        fhist.close() 
     #  But if it is a test involving multiple runs, call runPlot multiple times, then display a graph of all the fits.
     else:
         if args.test == "s":
@@ -205,12 +209,16 @@ if __name__ == "__main__":
         b1errs = []
         b2errs = []
         testnumbers = []
+        fhist = open("gvals.outs", "w")
+        fhist.write("# fiat 1.0\n")
+        fhist.write("# ttype1 = g1\n")
+        fhist.write("# ttype2 = g1\n")
         for file in files:
             if args.display == 'all':
                 display = True
             else:
                 display = False  
-            nPoints, m1, m1err, b1, b1err, m2, m2err, b2, b2err = runPlot(file, args.filter, args.seeing, useIndex=None, display=display)
+            nPoints, m1, m1err, b1, b1err, m2, m2err, b2, b2err, g1vals = runPlot(file, args.filter, args.seeing, useIndex=None, display=display, fhist = fhist)
             m1s.append(m1)
             m2s.append(m2)
             b1s.append(b1)
@@ -269,3 +277,4 @@ if __name__ == "__main__":
             ax4.set_ylim((b2s.min() + b2s.max() - yrange)/2.0, (b2s.min() + b2s.max() + yrange)/2.0)
             ax4.errorbar(testnumbers, b2s, yerr=b2errs, marker = ".", markersize=10, linestyle='None')
             plot.show()
+        fhist.close()

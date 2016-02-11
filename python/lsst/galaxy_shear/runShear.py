@@ -1,5 +1,6 @@
 import argparse
 import glob
+import math
 import os
 import shutil
 import signal
@@ -9,11 +10,63 @@ import subprocess
 
 
 import lsst.pex.config as pexConfig
-import lsst.afw.table
+import lsst.afw.table as afwTable
 
 from great3sims import constants, run
 from lsst.galaxy_shear.shearConfig import RunShearConfig
 from lsst.galaxy_shear.analyzeShearTest import runAnal
+
+def isNear(value1, value2, diff, tol):
+     return abs(abs(value1 - value2) - diff) < tol
+
+def getLookupCat(epochCatName, lookupCatName):
+    epochCat = afwTable.BaseCatalog.readFits(epochCatName)
+    schema = epochCat.getSchema()
+    lookup = dict()
+    keys = []
+    for name in ("cosmos_ident", "gal_sn", "bulge_n", "bulge_hlr", "bulge_q", "bulge_flux", "disk_hlr", "disk_q", "disk_flux"):
+        keys.append(schema.find(name).key)
+    bulgeThetaKey = schema.find("bulge_beta_radians").key
+    diskThetaKey = schema.find("disk_beta_radians").key
+ 
+    for i in range(len(epochCat)):
+        if i in lookup.values():
+            continue
+        source = epochCat[i]
+        for j in range(i+1, len(epochCat)):
+            fail = False
+            for key in keys:
+                if not source.get(key) == epochCat[j].get(key):
+                    fail = True
+                    break
+            if fail: 
+                continue
+            thetai = epochCat[i].get(bulgeThetaKey)
+            thetaj = epochCat[j].get(bulgeThetaKey)
+            if not isNear(thetai, thetaj, math.pi/2.0, .05):
+                continue
+            thetai = epochCat[i].get(diskThetaKey)
+            thetaj = epochCat[j].get(diskThetaKey)
+            if not thetai == 0.0 and not isNear(thetai, thetaj, math.pi/2.0, .05):
+                continue
+            if j in lookup.values():
+                continue
+            lookup[i] = j
+            break
+        if not i in lookup.keys():
+            print lookupCatName, "Failed to find match", i
+            lookup[i] = -1
+        schema = afwTable.Schema()
+        galKey = schema.addField("gal", type = int, doc = "index of record in a source catalog")
+        pairKey = schema.addField("pair", type = int, doc = "index of record in a source catalog")
+        lookupCat = afwTable.BaseCatalog(schema)
+        for key in lookup.keys():
+            pair = lookup[key]
+            rec = lookupCat.addNew()
+            rec.set(galKey, key)
+            rec.set(pairKey, pair)
+    lookupCat.writeFits(lookupCatName)
+    return lookupCat 
 
 def waitforpids(pidlist, waituntil=0):
     """
@@ -86,7 +139,8 @@ def runcmd(args,env=None,stdoutname=None,stderrname=None,append=True):
         raise StandardError(errstring)
     return
 
-def runShear(baseDirs, tests=[None], forks=1, clobber=1, great3=False, galsim=False, meas=False, anal=False,
+def runShear(baseDirs, output_dir=None, tests=[None], forks=1, clobber=1,
+             great3=False, galsim=False, lookup=False, meas=False, anal=False,
              subfield_start=None, subfield_end=None):
     #   open the run_params file for this run and extract what we need.
     
@@ -103,8 +157,6 @@ def runShear(baseDirs, tests=[None], forks=1, clobber=1, great3=False, galsim=Fa
                     config.filter = int(baseArgs[0][1:])
                     config.seeing = float(baseArgs[1])
                     config.shear_value = float(baseArgs[2])
-                    config.psf_dir = os.path.join(config.psf_lib_dir,
-                                        "f%d_%s"%(config.filter, config.seeing))
                     if not os.path.isdir(os.path.join(great3_dir, "psfs")):
                         os.symlink(config.psf_dir, os.path.join(great3_dir, "psfs")) 
                 else:
@@ -166,6 +218,39 @@ def runShear(baseDirs, tests=[None], forks=1, clobber=1, great3=False, galsim=Fa
                         stdoutname="galsim.stdout", append=True)
                 os.chdir(cwd)
 
+    if lookup:
+        for base in baseDirs:
+            config = RunShearConfig()
+            config.load(os.path.join(base, "shear.config"))
+            if subfield_start is None:
+                startSubfield = 0
+            else:
+                startSubfield = subfield_start
+            if subfield_end is None:
+                endSubfield = config.n_subfields-1
+            else:
+                endSubfield = subfield_end
+            for subfield in range(startSubfield, endSubfield+1):
+                lookupCatName = '%s/control/ground/constant/lookup-%03d-0.fits'%(base,subfield) 
+                epochCatName = '%s/control/ground/constant/epoch_catalog-%03d-0.fits'%(base,subfield) 
+                if forks > 1:
+                    if len(pidlist) >= forks:
+                        waitforpids(pidlist, waituntil=forks-1)
+                    pid = os.fork()
+                    if pid:
+                        # we are the parent
+                        pidlist.append(pid)
+                    else:
+                        # we are the child
+                        lookupCat = getLookupCat(epochCatName, lookupCatName)
+                        print "made", lookupCatName, len(lookupCat)
+                        sys.exit(0)
+                else:
+                        lookupCat = getLookupCat(epochCatName, lookupCatName)
+                        print "made", lookupCatName, len(lookupCat)
+        if forks > 1:
+            waitforpids(pidlist)
+
     if meas:
         for test in tests:
             for base in baseDirs:
@@ -174,28 +259,39 @@ def runShear(baseDirs, tests=[None], forks=1, clobber=1, great3=False, galsim=Fa
                 tempPath = os.path.join(base, "processShearTest.py") 
                 shutil.copy("processShearTest.py", tempPath)
                 fout = open(tempPath, "a")
-                fout.write("root.galaxyStampSize = %d\n"%config.galaxy_stamp_size)
-                fout.write("root.measPlugin = '%s'\n"%config.shape_field)
-                fout.write("root.noClobber = %s\n"%(not clobber))
+                fout.write("config.galaxyStampSize = %d\n"%config.galaxy_stamp_size)
+                fout.write("config.measPlugin = '%s'\n"%config.shape_field)
+                fout.write("config.noClobber = %s\n"%(not clobber))
                 if not test is None and test[0] == 'n':
                     nGrow = int(test[1:])
-                    fout.write('root.measurement.plugins["modelfit_CModel"].region.nGrowFootprint=%d\n'%nGrow)
+                    fout.write('config.measurement.plugins["modelfit_CModel"].region.nGrowFootprint=%d\n'%nGrow)
                 if not test is None:
-                    fout.write('root.test="%s"\n'%test)
+                    fout.write('config.test="%s"\n'%test)
                 if not test is None and test[0] == 's':
                     stampSize = int(test[1:])
-                    fout.write('root.measurement.plugins["modelfit_CModel"].region.nInitialRadii=0\n')
-                    fout.write('root.stampSize=%d\n'%stampSize)
-                    fout.write('root.measurement.plugins["modelfit_CModel"].region.nGrowFootprint=0\n')
-                    fout.write('root.measurement.plugins["modelfit_CModel"].region.maxBadPixelFraction=.5\n')
+                    fout.write('config.measurement.plugins["modelfit_CModel"].region.nInitialRadii=0\n')
+                    fout.write('config.stampSize=%d\n'%stampSize)
+                    fout.write('config.measurement.plugins["modelfit_CModel"].region.nGrowFootprint=0\n')
+                    fout.write('config.measurement.plugins["modelfit_CModel"].region.maxBadPixelFraction=.5\n')
                 if not test is None and test[0] == 'r':
                     nInitialRadii = float(test[1:])
-                    fout.write('root.measurement.plugins["modelfit_CModel"].region.nInitialRadii=%.1f\n'%nInitialRadii)
-                    fout.write('root.measurement.plugins["modelfit_CModel"].region.nGrowFootprint=0\n')
+                    fout.write('config.measurement.plugins["modelfit_CModel"].region.nInitialRadii=%.1f\n'%nInitialRadii)
+                    fout.write('config.measurement.plugins["modelfit_CModel"].region.nGrowFootprint=0\n')
+                if not test is None and test[0] == 'a':
+                    approxTest = test[1:]
+                    fout.write('config.measurement.plugins["modelfit_ShapeletPsfApprox"].sequence=["%s"]\n'%approxTest)
+                    fout.write('config.measurement.plugins["modelfit_CModel"].psfName="%s"\n'%approxTest)
+
                 if not test is None:
-                    fout.write('root.test="%s"\n'%test)
+                    fout.write('config.test="%s"\n'%test)
                 fout.close()
-                out = os.path.join(base, config.exp_type + "/ground/constant")
+                input_dir = os.path.join(base, config.exp_type + "/ground/constant")
+                if output_dir is None:
+                    out = input_dir    
+                else:
+                    out = output_dir
+                if not test is None:
+                    out = os.path.join(out, test)
                 if subfield_start is None:
                     startSubfield = 0
                 else:
@@ -204,29 +300,38 @@ def runShear(baseDirs, tests=[None], forks=1, clobber=1, great3=False, galsim=Fa
                     endSubfield = config.n_subfields-1
                 else:
                     endSubfield = subfield_end
-    
-                runcmd(("processShearTest.py", out, "-j", str(forks), "--configfile=%s"%(tempPath),
+                tries = 0
+                if not os.path.isfile(os.path.join(out, "shear.config")):
+                    config.save(os.path.join(out, "shear.config"))
+                while True: 
+                    try:
+                        print "OUTPUT DIRECTORY", out
+                        runcmd(("processShearTest.py", input_dir, "-j", str(forks), "--configfile=%s"%(tempPath),
                         "--id", "subfield=%d..%d"%(startSubfield, endSubfield), "epoch=0..%d"%(config.n_epochs-1),
                         "--output", out
                         ), stdoutname="%s/meas.stdout"%base, append=False)
+                        break
+                    except:
+                        tries = tries + 1
+                        if tries > 3:
+                            raise
     if anal:
         for test in tests:
-            print test
             if test is None:
-                outfile = "anal.fits"
-                subfieldoutfile = "subfield_anal.fits"
+                outfile = "anal.fits"%test
+                subfieldoutfile = "subfields.fits"
             else: 
                 outfile = "anal_%s.fits"%test
-                subfieldoutfile = "subfield_anal_%s.fits"%test
+                subfieldoutfile = "subfields_%s.fits"%test
             for base in baseDirs:
                     config = RunShearConfig()
                     config.load(os.path.join(base, "shear.config"))
                     config.psf_dir = os.path.join(config.psf_lib_dir, "f%d_%s"%(config.filter, config.seeing))
-                    if os.path.isfile(os.path.join(base, subfieldoutfile)) and not clobber:
+                    if os.path.isfile(os.path.join(output_dir, subfieldoutfile)) and not clobber:
                         continue
                     if forks > 1:
                         if len(pidlist) >= forks:
-                            waitforpids(pidlist, waitutil=forks-1)
+                            waitforpids(pidlist, waituntil=forks-1)
                         pid = os.fork()
                         if pid:
                             # we are the parent
@@ -242,9 +347,9 @@ def runShear(baseDirs, tests=[None], forks=1, clobber=1, great3=False, galsim=Fa
     
             outCat = None
             for base in baseDirs:
-                sourceCat = lsst.afw.table.BaseCatalog.readFits(os.path.join(base, subfieldoutfile))
+                sourceCat = afwTable.BaseCatalog.readFits(os.path.join(base, subfieldoutfile))
                 if outCat is None:
-                    outCat = lsst.afw.table.BaseCatalog(sourceCat.getSchema())
+                    outCat = afwTable.BaseCatalog(sourceCat.getSchema())
                 print "catalog for %s has %d rows"%(base, len(sourceCat))
                 outCat.extend(sourceCat)
             print "outCat: ", len(outCat)
@@ -263,6 +368,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("-b", "--base", help="directory containing shear.config", type = str)
+    parser.add_argument("-o", "--output_dir", help="directory where measurements are output", type = str, default=None)
     parser.add_argument("-v", "--shear_values", help="comma separated shear values",
         type = str, default=None)
     parser.add_argument("-f", "--filter", help="number of the filter for PhoSim", type = int)
@@ -276,6 +382,7 @@ if __name__ == "__main__":
     parser.add_argument("-p", "--processes", help="Number of forks, max", type = int, default=1)
     parser.add_argument("-3", "--great3", action='store_true', help="run great3sims")
     parser.add_argument("-g", "--galsim", action='store_true', help="run galsim")
+    parser.add_argument("-l", "--lookup", action='store_true', help="make pair lookup")
     parser.add_argument("-m", "--meas", action='store_true', help="run measurement algorithm")
     parser.add_argument("-a", "--anal", action='store_true', help="run analysis program")
 
@@ -286,7 +393,10 @@ if __name__ == "__main__":
     if args.base is None:
         config.load("shear.config")
     else:
-        config.load(os.path.join(args.base, "shear.config"))
+        if os.path.isfile(os.path.join(args.base, "shear.config")):
+            config.load(os.path.join(args.base, "shear.config"))
+        else:
+            config.load("shear.config")
     if not args.filter is None:
         config.filter = args.filter
 
@@ -294,6 +404,8 @@ if __name__ == "__main__":
         print "Must specify either a base directory or a set of shear values."
         sys.exit(1)
 
+    config.psf_dir = os.path.join(config.psf_lib_dir,
+        "f%d_%s"%(config.filter, config.seeing))
     baseDirs = []
     #  Create directories named with filter, seeing_values, and shear_values.
     if args.base is None:
@@ -326,11 +438,20 @@ if __name__ == "__main__":
         if not args.shear_values is None:
             config.shear_value = float(args.shear_values)
         if not args.seeing_values is None:
-            config.seeing_value = float(args.seeing_values)
+            config.seeing = float(args.seeing_values)
         if not os.path.isdir(args.base):
             os.makedirs(args.base)
         if not os.path.isfile(os.path.join(args.base, "shear.config")):
-            config.save(os.path.join(base, "shear.config"))
+            config.save(os.path.join(args.base, "shear.config"))
+        if args.output_dir == None:
+            output_dir = args.base
+        else:
+            output_dir = args.output_dir
         baseDirs.append(args.base)
-    runShear(baseDirs, clobber=args.clobber, forks=args.processes, great3=args.great3,
-             galsim=args.galsim, meas=args.meas, anal=args.anal, tests=args.tests.split(','), subfield_start=args.subfield_start, subfield_end=args.subfield_end)
+    if args.tests is None:
+        tests = [None]
+    else:
+        tests = args.tests.split(",")
+    runShear(baseDirs, output_dir=args.output_dir, clobber=args.clobber, forks=args.processes, great3=args.great3,
+             galsim=args.galsim, lookup=args.lookup, meas=args.meas, anal=args.anal, tests=tests,
+             subfield_start=args.subfield_start, subfield_end=args.subfield_end)

@@ -94,7 +94,7 @@ def runAnal(baseDir, outFile, config, test=None):
         sigma_signal_field = None
 
     #   Use the butler to get the src.fits file for each subfield/epoch
-    butler = dafPersist.Butler(root=os.path.join(baseDir, config.exp_type + "/ground/constant"))
+    #butler = dafPersist.Butler(root=os.path.join(baseDir, config.exp_type + "/ground/constant"))
 
     count = 0
     nanCount = 0
@@ -121,9 +121,11 @@ def runAnal(baseDir, outFile, config, test=None):
             catE1SumSq = 0.0
             catE2SumSq = 0.0
             if not test is None:
-                sourceCat = butler.get("test_src", {'subfield':subfield, 'epoch':epoch, 'test': test})
+                sourceCat = afwTable.BaseCatalog.readFits(os.path.join(os.path.join(baseDir, test), "src-%03d.fits"%subfield))
+                #butler.get("test_src", {'subfield':subfield, 'epoch':epoch, 'test': test})
             else:
-                sourceCat = butler.get("src", {'subfield':subfield, 'epoch':epoch})
+                sourceCat = afwTable.BaseCatalog.readFits(os.path.join(baseDir, "src-%03d.fits"%subfield))
+                #sourceCat = butler.get("src", {'subfield':subfield, 'epoch':epoch})
             # make a list of all the error flags
             if len(flagCount) == 0:
                 for name in sourceCat.getSchema().getNames():
@@ -258,7 +260,6 @@ if __name__ == "__main__":
             out_file = "subfields.fits"
         else:
             out_file = "subfields_" + args.test + ".fits"
-
     #   open the config file for this run
     config = RunShearConfig()
     config.load(os.path.join(args.base_dir, "shear.config"))
