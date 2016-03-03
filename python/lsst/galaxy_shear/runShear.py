@@ -85,13 +85,11 @@ def runcmd(args,env=None,stdoutname=None,stderrname=None,append=True):
         raise StandardError(errstring)
     return
 
-def runShear(baseDirs, test=None, forks=1, clobber=1, great3=False, galsim=False, meas=False, anal=False):
-    #   open the run_params file for this run and extract what we need.
-    
+def runShear(base, tests, forks=1, clobber=1, great3=False, galsim=False, meas=False, anal=False, join=False):
+
     #  Do initial directory setup
     pidlist = []
     if great3:
-        for base in baseDirs:
                 config = RunShearConfig()
                 config.load(os.path.join(base, "shear.config"))
                 great3_dir = base + "/" + config.exp_type + "/ground/constant"
@@ -151,7 +149,6 @@ def runShear(baseDirs, test=None, forks=1, clobber=1, great3=False, galsim=False
     waitforpids(pidlist)
 
     if galsim:
-        for base in baseDirs:
                 config = RunShearConfig()
                 config.load(os.path.join(base, "shear.config"))
                 cwd = os.getcwd()
@@ -166,7 +163,7 @@ def runShear(baseDirs, test=None, forks=1, clobber=1, great3=False, galsim=False
                 os.chdir(cwd)
 
     if meas:
-        for base in baseDirs:
+        for test in tests:
             config = RunShearConfig()
             config.load(os.path.join(base, "shear.config"))
             tries = 0
@@ -199,11 +196,11 @@ def runShear(baseDirs, test=None, forks=1, clobber=1, great3=False, galsim=False
                     tries = tries + 1
                     continue
     if anal:
-        if test is None:
+        for test in tests:
             outfile = "anal.fits"
         else: 
             outfile = "anal_%s.fits"%test
-        for base in baseDirs:
+        for test in [test]:
                 config = RunShearConfig()
                 config.load(os.path.join(base, "shear.config"))
                 config.psf_dir = os.path.join(config.psf_lib_dir, "f%d_%s"%(config.filter, config.seeing))
@@ -224,16 +221,17 @@ def runShear(baseDirs, test=None, forks=1, clobber=1, great3=False, galsim=False
                         runAnal(base, outfile, config, test=test)
         if forks > 1:
             waitforpids(pidlist)
-        outCat = None
 
-        for base in baseDirs:
-            sourceCat = lsst.afw.table.BaseCatalog.readFits(os.path.join(base, "sum_"+outfile))
+    if join:
+        outCat = None
+        for test in tests:
+            sourceCat = lsst.afw.table.BaseCatalog.readFits(os.path.join(base, "sum_anal.fits"))
             if outCat is None:
                 outCat = lsst.afw.table.BaseCatalog(sourceCat.getSchema())
             outCat.append(sourceCat[0])
         print "outCat: ", len(outCat)
         if not outCat is None: 
-            outCat.writeFits(os.path.join("sum_"+outfile))
+            outCat.writeFits(os.path.join(base, "sum_anal.fits_"))
             
 if __name__ == "__main__":
     """
@@ -253,18 +251,19 @@ if __name__ == "__main__":
         type = float, default=None)
     parser.add_argument("-c", "--clobber", type=int, help="set to 0 to preserve existing outputs",
         default=1)
-    parser.add_argument("-t", "--test", help="run on specific data subset")
+    parser.add_argument("-t", "--tests", help="run on specific data subsets")
     parser.add_argument("-p", "--processes", help="Number of forks, max", type = int, default=1)
     parser.add_argument("-3", "--great3", action='store_true', help="run great3sims")
     parser.add_argument("-g", "--galsim", action='store_true', help="run galsim")
     parser.add_argument("-m", "--meas", action='store_true', help="run measurement algorithm")
     parser.add_argument("-a", "--anal", action='store_true', help="run analysis program")
+    parser.add_argument("-j", "--join", action='store_true', help="join analysis runs")
 
     args = parser.parse_args()
 
     #   open the config file for this run
     config = RunShearConfig()
-    if args.base is None:
+    if not os.path.isfile(os.path.join(args.base, "shear.config")):
         config.load("shear.config")
     else:
         config.load(os.path.join(args.base, "shear.config"))
@@ -273,14 +272,13 @@ if __name__ == "__main__":
     if not args.seeing is None:
         config.seeing = args.seeing
 
-    #  Do initial directory setup
+    #  See if this is a multiple run or a single base
     if not args.base is None and not args.shear_values is None:
         print "Cannot set both a base directory and a set of filter, seeing, and shear values."
         sys.exit(1)
     if args.base is None and args.shear_values is None:
         print "Must have either a base directory or a set of filter, seeing, and shear values."
         sys.exit(1)
-
     baseDirs = []
     #  If list of shear_values are provided, create directories named with filter, seein, shear.
     if not args.shear_values is None:
@@ -293,6 +291,13 @@ if __name__ == "__main__":
             baseDirs.append(base)
     else:
         baseDirs.append(args.base)
-        
-    runShear(baseDirs, clobber=args.clobber, forks=args.processes, great3=args.great3,
-             galsim=args.galsim, meas=args.meas, anal=args.anal, test=args.test)
+
+    if args.tests is None:
+        tests = ["output"]
+    else:
+        tests = args.tests.split[","]
+
+    for base in baseDirs:
+        runShear(base, tests, clobber=args.clobber, forks=args.processes, great3=args.great3,
+             galsim=args.galsim, meas=args.meas, anal=args.anal, join=args.join)
+
