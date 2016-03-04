@@ -21,7 +21,7 @@ def waitforpids(pidlist, waituntil=0):
     """
 
     while len(pidlist) > waituntil:
-        (waitpid,retcode) = os.wait()    
+        (waitpid,retcode) = os.wait()
         print "pid %d is done, retcode %d\n" % (waitpid, retcode)
         pidlist.remove(waitpid)
         if retcode != 0:
@@ -31,7 +31,7 @@ def waitforpids(pidlist, waituntil=0):
 
 def runcmd(args,env=None,stdoutname=None,stderrname=None,append=True):
     """
-    runcmd is used to make external calls.  
+    runcmd is used to make external calls.
     args is a list of what would be space separated arguments, with the convention that
     args[0] is the name of the command.  An argument of space separated names should not be quoted
 
@@ -40,11 +40,11 @@ def runcmd(args,env=None,stdoutname=None,stderrname=None,append=True):
     Otherwise, this command received stdout back through a pipe and returns it.
 
     On error, this program will throw StandardError with a string containing the stderr return
-    from the calling program.  Throws may also occur directly from process.POpen (e.g., OSError)            
+    from the calling program.  Throws may also occur directly from process.POpen (e.g., OSError)
 
-    This program will also return a cmd style facsimile of the command and arguments 
+    This program will also return a cmd style facsimile of the command and arguments
     """
-    
+
     cmdstring = args[0]
     for i in range(1,len(args)):
         if args[i].find(' ') >= 0: cmdstring += " '%s'" % args[i]
@@ -61,7 +61,7 @@ def runcmd(args,env=None,stdoutname=None,stderrname=None,append=True):
         else:
             stdout_handle = open(stdoutname,"w")
     else:
-        stdout_handle = None 
+        stdout_handle = None
 
     if stderrname != None:
         if append:
@@ -81,7 +81,7 @@ def runcmd(args,env=None,stdoutname=None,stderrname=None,append=True):
     #    The calling program will not throw on failure, but we should to make it compatible with
     #    Python programming practices
     if errcode:
-        errstring = 'Command "%s" failed with code %d\n' % (cmdstring,errcode) 
+        errstring = 'Command "%s" failed with code %d\n' % (cmdstring,errcode)
         raise StandardError(errstring)
     return
 
@@ -93,73 +93,73 @@ def runShear(base, tests, forks=1, clobber=1, great3=False, galsim=False, meas=F
     config.load(os.path.join(base, "shear.config"))
     pidlist = []
     if great3:
-                # Initialize the great3 dir prior to building the epoch_catalogs
-                great3_dir = base + "/" + config.exp_type + "/ground/constant"
-                if os.path.isdir(great3_dir):
-                     shutil.rmtree(great3_dir)
-                os.makedirs(great3_dir)
-                if not os.path.isdir(os.path.join(great3_dir, "psfs")):
-                    psf_dir = os.path.join(config.psf_lib_dir,
-                                        "f%d_%s"%(config.filter, config.seeing))
-                    if os.path.isdir(psf_dir):
-                        os.symlink(psf_dir, os.path.join(great3_dir, "psfs")) 
-                    else:
-                        raise Exception("Required psf directory %s does not exist"%(psf_dir,))
-                fout = open(os.path.join(great3_dir, "_mapper"), "w")
-                fout.write("lsst.obs.great3.Great3Mapper")
-                fout.close()
-                constants.image_size_deg = config.fov
-                constants.nrows = config.ndims
-                constants.ncols = config.ndims
-                constants.n_subfields =  config.n_subfields
-                constants.xsize["ground"][True] = config.galaxy_stamp_size
-                constants.xsize["ground"][False] = config.galaxy_stamp_size
-                constants.n_subfields_per_field["constant"][True] = 1
-                constants.subfield_grid_subsampling = 1
-                constants.n_deep_subfields = 0
-                constants.deep_frac = 0.0
-                subfield_max = constants.n_subfields + constants.n_deep_subfields - 1
+        # Initialize the great3 dir prior to building the epoch_catalogs
+        great3_dir = base + "/" + config.exp_type + "/ground/constant"
+        if os.path.isdir(great3_dir):
+             shutil.rmtree(great3_dir)
+        os.makedirs(great3_dir)
+        if not os.path.isdir(os.path.join(great3_dir, "psfs")):
+            psf_dir = os.path.join(config.psf_lib_dir,
+                                "f%d_%s"%(config.filter, config.seeing))
+            if os.path.isdir(psf_dir):
+                os.symlink(psf_dir, os.path.join(great3_dir, "psfs"))
+            else:
+                raise Exception("Required psf directory %s does not exist"%(psf_dir,))
+        fout = open(os.path.join(great3_dir, "_mapper"), "w")
+        fout.write("lsst.obs.great3.Great3Mapper")
+        fout.close()
+        constants.image_size_deg = config.fov
+        constants.nrows = config.ndims
+        constants.ncols = config.ndims
+        constants.n_subfields =  config.n_subfields
+        constants.xsize["ground"][True] = config.galaxy_stamp_size
+        constants.xsize["ground"][False] = config.galaxy_stamp_size
+        constants.n_subfields_per_field["constant"][True] = 1
+        constants.subfield_grid_subsampling = 1
+        constants.n_deep_subfields = 0
+        constants.deep_frac = 0.0
+        subfield_max = constants.n_subfields + constants.n_deep_subfields - 1
 
-                # Now run great3 to build the catalogs
-                if forks > 1:
-                    if len(pidlist) >= forks:
-                        waitforpids(pidlist, waitutil=forks-1)
-                    pid = os.fork()
-                    if pid:
-                        # we are the parent
-                        pidlist.append(pid)
-                    else:
-                        # we are the child
-                        run(base, gal_dir=config.gal_dir, steps=["metaparameters", "catalogs", "config",],
-                            experiments=[config.exp_type], obs_type="ground", shear_type=["constant"], 
-                            draw_psf_src = '%s/control/ground/constant/psfs/psfs.index'%base, 
-                            subfield_max=subfield_max,
-                            shear_value=config.shear_value,
-                            shear_angle=config.shear_angle
-                        )
-                        sys.exit(0)
-                else:
-                    run(base, gal_dir=config.gal_dir, steps=["metaparameters", "catalogs", "config",],
-                        experiments=[config.exp_type], obs_type="ground", shear_type=["constant"], 
-                        draw_psf_src = '%s/control/ground/constant/psfs/psfs.index'%base, 
-                        subfield_max=subfield_max,
-                        shear_value=config.shear_value,
-                        shear_angle=config.shear_angle
-                    )
+        # Now run great3 to build the catalogs
+        if forks > 1:
+            if len(pidlist) >= forks:
+                waitforpids(pidlist, waitutil=forks-1)
+            pid = os.fork()
+            if pid:
+                # we are the parent
+                pidlist.append(pid)
+            else:
+                # we are the child
+                run(base, gal_dir=config.gal_dir, steps=["metaparameters", "catalogs", "config",],
+                    experiments=[config.exp_type], obs_type="ground", shear_type=["constant"],
+                    draw_psf_src = '%s/control/ground/constant/psfs/psfs.index'%base,
+                    subfield_max=subfield_max,
+                    shear_value=config.shear_value,
+                    shear_angle=config.shear_angle
+                )
+                sys.exit(0)
+        else:
+            run(base, gal_dir=config.gal_dir, steps=["metaparameters", "catalogs", "config",],
+                experiments=[config.exp_type], obs_type="ground", shear_type=["constant"],
+                draw_psf_src = '%s/control/ground/constant/psfs/psfs.index'%base,
+                subfield_max=subfield_max,
+                shear_value=config.shear_value,
+                shear_angle=config.shear_angle
+            )
 
     waitforpids(pidlist)
 
     if galsim:
-                cwd = os.getcwd()
-                os.chdir(base)
-                print "output.noclobber=%s"%(not clobber)
-                runcmd(("galsim", "cgc.yaml", "output.noclobber=%s"%(not clobber)),
-                        stdoutname="galsim.stdout", append=False)
-                runcmd(("galsim", "cgc_psf.yaml", "output.noclobber=%s"%(not clobber)),
-                        stdoutname="galsim.stdout", append=True)
-                runcmd(("galsim", "cgc_star_test.yaml", "output.noclobber=%s"%(not clobber)),
-                        stdoutname="galsim.stdout", append=True)
-                os.chdir(cwd)
+        cwd = os.getcwd()
+        os.chdir(base)
+        print "output.noclobber=%s"%(not clobber)
+        runcmd(("galsim", "cgc.yaml", "output.noclobber=%s"%(not clobber)),
+                stdoutname="galsim.stdout", append=False)
+        runcmd(("galsim", "cgc_psf.yaml", "output.noclobber=%s"%(not clobber)),
+                stdoutname="galsim.stdout", append=True)
+        runcmd(("galsim", "cgc_star_test.yaml", "output.noclobber=%s"%(not clobber)),
+                stdoutname="galsim.stdout", append=True)
+        os.chdir(cwd)
 
     if meas:
         for test in tests:
@@ -195,7 +195,7 @@ def runShear(base, tests, forks=1, clobber=1, great3=False, galsim=False, meas=F
     if anal:
         for test in tests:
             outfile = "anal.fits"
-        else: 
+        else:
             outfile = "anal_%s.fits"%test
         for test in [test]:
                 if os.path.isfile(os.path.join(base, outfile)) and not clobber:
@@ -224,9 +224,9 @@ def runShear(base, tests, forks=1, clobber=1, great3=False, galsim=False, meas=F
                 outCat = lsst.afw.table.BaseCatalog(sourceCat.getSchema())
             outCat.append(sourceCat[0])
         print "outCat: ", len(outCat)
-        if not outCat is None: 
+        if not outCat is None:
             outCat.writeFits(os.path.join(base, "sum_anal.fits_"))
-            
+
 if __name__ == "__main__":
     """
     This main program reads data for multiple runs in filter, seeing, and shear value, and
