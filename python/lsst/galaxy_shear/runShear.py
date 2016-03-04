@@ -87,25 +87,24 @@ def runcmd(args,env=None,stdoutname=None,stderrname=None,append=True):
 
 def runShear(base, tests, forks=1, clobber=1, great3=False, galsim=False, meas=False, anal=False, join=False):
 
-    #  Do initial directory setup
+    # The config file for all shear tasks is in the base directory.
+    # It should never be modified, and once it is written, it is definitive.
+    config = RunShearConfig()
+    config.load(os.path.join(base, "shear.config"))
     pidlist = []
     if great3:
-                config = RunShearConfig()
-                config.load(os.path.join(base, "shear.config"))
+                # Initialize the great3 dir prior to building the epoch_catalogs
                 great3_dir = base + "/" + config.exp_type + "/ground/constant"
                 if os.path.isdir(great3_dir):
                      shutil.rmtree(great3_dir)
                 os.makedirs(great3_dir)
-                baseArgs = base.split("_")
-                if  baseArgs[0][0] == 'f' and baseArgs[0][1:].isdigit() and len(baseArgs) == 3:
-                    config.filter = int(baseArgs[0][1:])
-                    config.seeing = float(baseArgs[1])
-                    config.shear_value = float(baseArgs[2])
-                    config.psf_dir = os.path.join(config.psf_lib_dir,
+                if not os.path.isdir(os.path.join(great3_dir, "psfs")):
+                    psf_dir = os.path.join(config.psf_lib_dir,
                                         "f%d_%s"%(config.filter, config.seeing))
-                    os.symlink(config.psf_dir, os.path.join(great3_dir, "psfs")) 
-                else:
-                    os.symlink(os.path.abspath(config.psf_dir), os.path.join(great3_dir, "psfs")) 
+                    if os.path.isdir(psf_dir):
+                        os.symlink(psf_dir, os.path.join(great3_dir, "psfs")) 
+                    else:
+                        raise Exception("Required psf directory %s does not exist"%(psf_dir,))
                 fout = open(os.path.join(great3_dir, "_mapper"), "w")
                 fout.write("lsst.obs.great3.Great3Mapper")
                 fout.close()
@@ -120,6 +119,8 @@ def runShear(base, tests, forks=1, clobber=1, great3=False, galsim=False, meas=F
                 constants.n_deep_subfields = 0
                 constants.deep_frac = 0.0
                 subfield_max = constants.n_subfields + constants.n_deep_subfields - 1
+
+                # Now run great3 to build the catalogs
                 if forks > 1:
                     if len(pidlist) >= forks:
                         waitforpids(pidlist, waitutil=forks-1)
@@ -149,8 +150,6 @@ def runShear(base, tests, forks=1, clobber=1, great3=False, galsim=False, meas=F
     waitforpids(pidlist)
 
     if galsim:
-                config = RunShearConfig()
-                config.load(os.path.join(base, "shear.config"))
                 cwd = os.getcwd()
                 os.chdir(base)
                 print "output.noclobber=%s"%(not clobber)
@@ -164,8 +163,6 @@ def runShear(base, tests, forks=1, clobber=1, great3=False, galsim=False, meas=F
 
     if meas:
         for test in tests:
-            config = RunShearConfig()
-            config.load(os.path.join(base, "shear.config"))
             tries = 0
             shutil.copy("processShearTest.py", "temp.py")
             fout = open("temp.py", "a")
@@ -201,9 +198,6 @@ def runShear(base, tests, forks=1, clobber=1, great3=False, galsim=False, meas=F
         else: 
             outfile = "anal_%s.fits"%test
         for test in [test]:
-                config = RunShearConfig()
-                config.load(os.path.join(base, "shear.config"))
-                config.psf_dir = os.path.join(config.psf_lib_dir, "f%d_%s"%(config.filter, config.seeing))
                 if os.path.isfile(os.path.join(base, outfile)) and not clobber:
                     continue
                 if forks > 1:
@@ -261,12 +255,11 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    #   open the config file for this run
+    #   open the config file for this run in case we need to initialize
+    #   if the config file already exists, we assume that it is correct
+    #   and do not overwrite it.
     config = RunShearConfig()
-    if not os.path.isfile(os.path.join(args.base, "shear.config")):
-        config.load("shear.config")
-    else:
-        config.load(os.path.join(args.base, "shear.config"))
+    config.load("shear.config")
     if not args.filter is None:
         config.filter = args.filter
     if not args.seeing is None:
@@ -279,6 +272,7 @@ if __name__ == "__main__":
     if args.base is None and args.shear_values is None:
         print "Must have either a base directory or a set of filter, seeing, and shear values."
         sys.exit(1)
+
     baseDirs = []
     #  If list of shear_values are provided, create directories named with filter, seein, shear.
     if not args.shear_values is None:
@@ -287,9 +281,14 @@ if __name__ == "__main__":
             config.shear_value = float(shear_value)
             if not os.path.isdir(base):
                 os.makedirs(base)
-            config.save(os.path.join(base, "shear.config"))
+            if not os.path.isfile(os.path.join(base, "shear.config")):
+                config.save(os.path.join(base, "shear.config"))
             baseDirs.append(base)
     else:
+        if not os.path.isdir(args.base):
+            os.makedirs(args.base)
+        if not os.path.isfile(os.path.join(args.base, "shear.config")):
+            config.save(os.path.join(args.base, "shear.config"))
         baseDirs.append(args.base)
 
     if args.tests is None:
