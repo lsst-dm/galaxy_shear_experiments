@@ -84,6 +84,7 @@ def runcmd(args,env=None,stdoutname=None,stderrname=None,append=True):
         errstring = 'Command "%s" failed with code %d\n' % (cmdstring,errcode)
         raise StandardError(errstring)
     return
+
 #  Write overrides to the processShearTest.py for this output directory
 
 def writeMeasurementOverrides(tempPath, config, test, clobber)
@@ -98,23 +99,39 @@ def writeMeasurementOverrides(tempPath, config, test, clobber)
     if not test is None:
         fout.write('root.test="%s"\n'%test)
     if not test is None and test[0] == 's':
-        footprintSize = int(test[1:])
-        fout.write('root.measurement.plugins["modelfit_CModel"].region.nGrowFootprint=0\n')
+        stampSize = int(test[1:])
         fout.write('root.measurement.plugins["modelfit_CModel"].region.nInitialRadii=0\n')
-    if not test is None:
-        fout.write('root.test="%s"\n'%test)
+        fout.write('root.stampSize=%d\n'%stampSize)
+        fout.write('root.measurement.plugins["modelfit_CModel"].region.nGrowFootprint=0\n')
+        fout.write('root.measurement.plugins["modelfit_CModel"].region.maxBadPixelFraction=.5\n')
+    if not test is None and test[0] == 'r':
+        nInitialRadii = float(test[1:])
+        fout.write('root.measurement.plugins["modelfit_CModel"].region.nInitialRadii=%.1f\n'%nInitialRadii)
+        fout.write('root.measurement.plugins["modelfit_CModel"].region.nGrowFootprint=0\n')
+    if not test is None and test[0] == 'a':
+        model = test[1:]
+        fout.write('model = "%s"\n'%(model,))
+        fout.write('root.measurement.plugins["modelfit_ShapeletPsfApprox"].sequence=[model]\n')
+        fout.write('root.measurement.plugins["modelfit_CModel"].psfName=model\n')
+        fout.write('root.measurement.plugins["modelfit_ShapeletPsfApprox"].models[model].optimizer.maxOuterIterations = 3000\n')
     fout.close()
 
-def runShear(base, tests, forks=1, clobber=1, great3=False, galsim=False, meas=False, anal=False, join=False):
+def runShear(base, out_dir, tests, forks=1, clobber=1, great3=False, galsim=False, meas=False, anal=False, join=False):
 
     # The config file for all shear tasks is in the base directory.
     # It should never be modified, and once it is written, it is definitive.
     config = RunShearConfig()
     config.load(os.path.join(base, "shear.config"))
+
+    # distinguish the input dir where the image.fits files are
+    # from the output dir, where the src.fits files go.
+    great3_dir = os.path.join(base, config.exp_type + "/ground/constant")
+    if out_dir is None:
+        out_dir = base
+
     pidlist = []
     if great3:
         # Initialize the great3 dir prior to building the epoch_catalogs
-        great3_dir = base + "/" + config.exp_type + "/ground/constant"
         if os.path.isdir(great3_dir):
              shutil.rmtree(great3_dir)
         os.makedirs(great3_dir)
@@ -152,7 +169,7 @@ def runShear(base, tests, forks=1, clobber=1, great3=False, galsim=False, meas=F
                 # we are the child
                 run(base, gal_dir=config.gal_dir, steps=["metaparameters", "catalogs", "config",],
                     experiments=[config.exp_type], obs_type="ground", shear_type=["constant"],
-                    draw_psf_src = '%s/control/ground/constant/psfs/psfs.index'%base,
+                    draw_psf_src = os.path.join(great3_dir, 'psfs/psfs.index'),
                     subfield_max=subfield_max,
                     shear_value=config.shear_value,
                     shear_angle=config.shear_angle
@@ -161,7 +178,7 @@ def runShear(base, tests, forks=1, clobber=1, great3=False, galsim=False, meas=F
         else:
             run(base, gal_dir=config.gal_dir, steps=["metaparameters", "catalogs", "config",],
                 experiments=[config.exp_type], obs_type="ground", shear_type=["constant"],
-                draw_psf_src = '%s/control/ground/constant/psfs/psfs.index'%base,
+                draw_psf_src = os.path.join(great3_dir, 'psfs/psfs.index'),
                 subfield_max=subfield_max,
                 shear_value=config.shear_value,
                 shear_angle=config.shear_angle
@@ -183,18 +200,24 @@ def runShear(base, tests, forks=1, clobber=1, great3=False, galsim=False, meas=F
 
     if meas:
         for test in tests:
-            tries = 0
+            if test is None:
+               src_dir = out_dir
+            else:
+                src_dir = os.path.join(out_dir, test)
+            if not os.path.isdir(src_dir):
+                os.makedirs(src_dir)
+
             # create a processShearTest.py for this output/test directory
             # only do this once, when the out_dir is created
             tempPath = os.path.join(out_dir, "processShearTest.py")
             if not os.path.isfile(tempPath):
                 writeMeasurementOverrides(tempPath, config, test, clobber)
-            out = os.path.join(base, config.exp_type + "/ground/constant")
+            tries = 0
             while tries < 5:
                 try:
-                    runcmd(("processShearTest.py", out, "-j", str(forks), "--configfile=temp.py",
+                    runcmd(("processShearTest.py", out_dir, "-j", str(forks), "--configfile=temp.py",
                         "--id", "subfield=0..%d"%(config.n_subfields-1), "epoch=0..%d"%(config.n_epochs-1),
-                        "--output", out
+                        "--output", src_dir
                         ), stdoutname="%s/meas.stdout"%base, append=False)
                     break
                 except:
@@ -246,6 +269,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("-b", "--base", help="directory containing shear.config", type = str)
+    parser.add_argument("-o", "--out_dir", help="directory to output src files", type = str)
     parser.add_argument("-v", "--shear_values", help="comma separated shear values",
         type = str, default=None)
     parser.add_argument("-f", "--filter", help="number of the filter for PhoSim", type = int)
@@ -300,11 +324,11 @@ if __name__ == "__main__":
         baseDirs.append(args.base)
 
     if args.tests is None:
-        tests = ["output"]
+        tests = [None]
     else:
         tests = args.tests.split[","]
 
     for base in baseDirs:
-        runShear(base, tests, clobber=args.clobber, forks=args.processes, great3=args.great3,
+        runShear(base, out_dir, tests, clobber=args.clobber, forks=args.processes, great3=args.great3,
              galsim=args.galsim, meas=args.meas, anal=args.anal, join=args.join)
 
