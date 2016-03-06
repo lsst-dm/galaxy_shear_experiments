@@ -84,6 +84,26 @@ def runcmd(args,env=None,stdoutname=None,stderrname=None,append=True):
         errstring = 'Command "%s" failed with code %d\n' % (cmdstring,errcode)
         raise StandardError(errstring)
     return
+#  Write overrides to the processShearTest.py for this output directory
+
+def writeMeasurementOverrides(tempPath, config, test, clobber)
+    shutil.copy("processShearTest.py", tempPath)
+    fout = open(tempPath, "a")
+    fout.write("root.galaxyStampSize = %d\n"%config.galaxy_stamp_size)
+    fout.write("root.measPlugin = '%s'\n"%config.shape_field)
+    fout.write("root.noClobber = %s\n"%(not clobber))
+    if not test is None and test[0] == 'n':
+        nGrow = int(test[1:])
+        fout.write('root.measurement.plugins["modelfit_CModel"].region.nGrowFootprint=%d\n'%nGrow)
+    if not test is None:
+        fout.write('root.test="%s"\n'%test)
+    if not test is None and test[0] == 's':
+        footprintSize = int(test[1:])
+        fout.write('root.measurement.plugins["modelfit_CModel"].region.nGrowFootprint=0\n')
+        fout.write('root.measurement.plugins["modelfit_CModel"].region.nInitialRadii=0\n')
+    if not test is None:
+        fout.write('root.test="%s"\n'%test)
+    fout.close()
 
 def runShear(base, tests, forks=1, clobber=1, great3=False, galsim=False, meas=False, anal=False, join=False):
 
@@ -164,23 +184,11 @@ def runShear(base, tests, forks=1, clobber=1, great3=False, galsim=False, meas=F
     if meas:
         for test in tests:
             tries = 0
-            shutil.copy("processShearTest.py", "temp.py")
-            fout = open("temp.py", "a")
-            fout.write("root.galaxyStampSize = %d\n"%config.galaxy_stamp_size)
-            fout.write("root.measPlugin = '%s'\n"%config.shape_field)
-            fout.write("root.noClobber = %s\n"%(not clobber))
-            if not test is None and test[0] == 'n':
-                nGrow = int(test[1:])
-                fout.write('root.measurement.plugins["modelfit_CModel"].region.nGrowFootprint=%d\n'%nGrow)
-            if not test is None:
-                fout.write('root.test="%s"\n'%test)
-            if not test is None and test[0] == 's':
-                footprintSize = int(test[1:])
-                fout.write('root.measurement.plugins["modelfit_CModel"].region.nGrowFootprint=0\n')
-                fout.write('root.measurement.plugins["modelfit_CModel"].region.nInitialRadii=0\n')
-            if not test is None:
-                fout.write('root.test="%s"\n'%test)
-            fout.close()
+            # create a processShearTest.py for this output/test directory
+            # only do this once, when the out_dir is created
+            tempPath = os.path.join(out_dir, "processShearTest.py")
+            if not os.path.isfile(tempPath):
+                writeMeasurementOverrides(tempPath, config, test, clobber)
             out = os.path.join(base, config.exp_type + "/ground/constant")
             while tries < 5:
                 try:
