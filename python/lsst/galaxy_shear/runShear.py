@@ -87,41 +87,47 @@ def runcmd(args,env=None,stdoutname=None,stderrname=None,append=True):
 
 #  Write overrides to the processShearTest.py for this output directory
 
-def writeMeasurementOverrides(tempPath, config, test, clobber)
+def writeMeasurementOverrides(tempPath, config, test, clobber):
     shutil.copy("processShearTest.py", tempPath)
     fout = open(tempPath, "a")
-    fout.write("root.galaxyStampSize = %d\n"%config.galaxy_stamp_size)
-    fout.write("root.measPlugin = '%s'\n"%config.shape_field)
-    fout.write("root.noClobber = %s\n"%(not clobber))
+    fout.write("config.galaxyStampSize = %d\n"%config.galaxy_stamp_size)
+    fout.write("config.measPlugin = '%s'\n"%config.shape_field)
+    fout.write("config.noClobber = %s\n"%(not clobber))
     if not test is None and test[0] == 'n':
         nGrow = int(test[1:])
-        fout.write('root.measurement.plugins["modelfit_CModel"].region.nGrowFootprint=%d\n'%nGrow)
+        fout.write('config.measurement.plugins["modelfit_CModel"].region.nGrowFootprint=%d\n'%nGrow)
     if not test is None:
-        fout.write('root.test="%s"\n'%test)
+        fout.write('config.test="%s"\n'%test)
     if not test is None and test[0] == 's':
         stampSize = int(test[1:])
-        fout.write('root.measurement.plugins["modelfit_CModel"].region.nInitialRadii=0\n')
-        fout.write('root.stampSize=%d\n'%stampSize)
-        fout.write('root.measurement.plugins["modelfit_CModel"].region.nGrowFootprint=0\n')
-        fout.write('root.measurement.plugins["modelfit_CModel"].region.maxBadPixelFraction=.5\n')
+        fout.write('config.measurement.plugins["modelfit_CModel"].region.nInitialRadii=0\n')
+        fout.write('config.stampSize=%d\n'%stampSize)
+        fout.write('config.measurement.plugins["modelfit_CModel"].region.nGrowFootprint=0\n')
+        fout.write('config.measurement.plugins["modelfit_CModel"].region.maxBadPixelFraction=.5\n')
     if not test is None and test[0] == 'r':
         nInitialRadii = float(test[1:])
-        fout.write('root.measurement.plugins["modelfit_CModel"].region.nInitialRadii=%.1f\n'%nInitialRadii)
-        fout.write('root.measurement.plugins["modelfit_CModel"].region.nGrowFootprint=0\n')
+        fout.write('config.measurement.plugins["modelfit_CModel"].region.nInitialRadii=%.1f\n'%nInitialRadii)
+        fout.write('config.measurement.plugins["modelfit_CModel"].region.nGrowFootprint=0\n')
     if not test is None and test[0] == 'a':
         model = test[1:]
         fout.write('model = "%s"\n'%(model,))
-        fout.write('root.measurement.plugins["modelfit_ShapeletPsfApprox"].sequence=[model]\n')
-        fout.write('root.measurement.plugins["modelfit_CModel"].psfName=model\n')
-        fout.write('root.measurement.plugins["modelfit_ShapeletPsfApprox"].models[model].optimizer.maxOuterIterations = 3000\n')
+        fout.write('config.measurement.plugins["modelfit_ShapeletPsfApprox"].sequence=[model]\n')
+        fout.write('config.measurement.plugins["modelfit_CModel"].psfName=model\n')
+        fout.write('config.measurement.plugins["modelfit_ShapeletPsfApprox"].models[model].optimizer.maxOuterIterations = 3000\n')
     fout.close()
 
-def runShear(base, out_dir, tests, forks=1, clobber=1, great3=False, galsim=False, meas=False, anal=False, join=False):
-
+def runShear(base, out_dir, tests, forks=1, clobber=1,
+             great3=False, galsim=False, meas=False, anal=False, join=False,
+             subfield_start=None, subfield_end=None):
+ 
     # The config file for all shear tasks is in the base directory.
     # It should never be modified, and once it is written, it is definitive.
     config = RunShearConfig()
     config.load(os.path.join(base, "shear.config"))
+    if subfield_start is None:
+        subfield_start = 0
+    if subfield_end is None:
+        subfield_end = config.n_subfields-1
 
     # distinguish the input dir where the image.fits files are
     # from the output dir, where the src.fits files go.
@@ -190,11 +196,48 @@ def runShear(base, out_dir, tests, forks=1, clobber=1, great3=False, galsim=Fals
         cwd = os.getcwd()
         os.chdir(base)
         print "output.noclobber=%s"%(not clobber)
-        runcmd(("galsim", "cgc.yaml", "output.noclobber=%s"%(not clobber)),
+
+        # If specific subfields requested, create a cgc.yaml for this range
+        cgc_yaml = "cgc.yaml"
+        if not subfield_start == 0 or not subfield_end == config.n_subfields - 1:
+            fin = open(cgc_yaml, "r")   
+            cgc_yaml = "cgc.%d_%d.yaml"%(subfield_start, subfield_end)
+            fout = open(cgc_yaml, "w")
+            for line in fin.read().split("\n"):
+                index = line.find("- {first: 0, last:")
+                if index > 0:
+                    line = line[0: index] + "- {first: %d, last: %d, repeat: 1, type: Sequence}"%(subfield_start, subfield_end)
+                index = line.find("nfiles: ")
+                if index > 0:
+                    line = line[0: index] + "nfiles: %d"%(subfield_end - subfield_start + 1)
+                fout.write(line + "\n")
+            fin.close()
+            fout.close()
+        runcmd(("galsim", cgc_yaml, "output.noclobber=%s"%(not clobber)),
                 stdoutname="galsim.stdout", append=False)
-        runcmd(("galsim", "cgc_psf.yaml", "output.noclobber=%s"%(not clobber)),
+
+        # If specific subfields requested, create a cgc_psf.yaml for this range
+        cgc_psf_yaml = "cgc_psf.yaml"
+        if not subfield_start == 0 or not subfield_end == config.n_subfields - 1:
+            fin = open(cgc_psf_yaml, "r")   
+            cgc_psf_yaml = "cgc_psf.%d_%d.yaml"%(subfield_start, subfield_end)
+            fout = open(cgc_psf_yaml, "w")
+            for line in fin.read().split("\n"):
+                index = line.find("- {first: 0, last:")
+                if index > 0:
+                    line = line[0: index] + "- {first: %d, last: %d, repeat: 1, type: Sequence}"%(subfield_start, subfield_end)
+                index = line.find("nfiles: ")
+                if index > 0:
+                    line = line[0: index] + "nfiles: %d"%(subfield_end - subfield_start + 1)
+                fout.write(line + "\n")
+            fin.close()
+            fout.close()
+        runcmd(("galsim", cgc_psf_yaml, "output.noclobber=%s"%(not clobber)),
                 stdoutname="galsim.stdout", append=True)
-        runcmd(("galsim", "cgc_star_test.yaml", "output.noclobber=%s"%(not clobber)),
+
+        # this only needs to be run once, so run it with the last one 
+        if subfield_end == config.n_subfields - 1:
+            runcmd(("galsim", "cgc_star_test.yaml", "output.noclobber=%s"%(not clobber)),
                 stdoutname="galsim.stdout", append=True)
         os.chdir(cwd)
 
@@ -209,14 +252,15 @@ def runShear(base, out_dir, tests, forks=1, clobber=1, great3=False, galsim=Fals
 
             # create a processShearTest.py for this output/test directory
             # only do this once, when the out_dir is created
-            tempPath = os.path.join(out_dir, "processShearTest.py")
+           
+            tempPath = os.path.join(src_dir, "processShearTest.py")
             if not os.path.isfile(tempPath):
                 writeMeasurementOverrides(tempPath, config, test, clobber)
             tries = 0
             while tries < 5:
                 try:
-                    runcmd(("processShearTest.py", out_dir, "-j", str(forks), "--configfile=temp.py",
-                        "--id", "subfield=0..%d"%(config.n_subfields-1), "epoch=0..%d"%(config.n_epochs-1),
+                    runcmd(("processShearTest.py", great3_dir, "-j", str(forks), "--configfile=%s"%tempPath,
+                        "--id", "subfield=%d..%d"%(subfield_start, subfield_end), "epoch=0..%d"%(config.n_epochs-1),
                         "--output", src_dir
                         ), stdoutname="%s/meas.stdout"%base, append=False)
                     break
@@ -277,6 +321,8 @@ if __name__ == "__main__":
         type = float, default=None)
     parser.add_argument("-c", "--clobber", type=int, help="set to 0 to preserve existing outputs",
         default=1)
+    parser.add_argument("-x", "--subfield_start", type=int, help="start on specific subfield", default=None)
+    parser.add_argument("-y", "--subfield_end", type=int, help="end on specific subfield", default=None)
     parser.add_argument("-t", "--tests", help="run on specific data subsets")
     parser.add_argument("-p", "--processes", help="Number of forks, max", type = int, default=1)
     parser.add_argument("-3", "--great3", action='store_true', help="run great3sims")
@@ -326,9 +372,10 @@ if __name__ == "__main__":
     if args.tests is None:
         tests = [None]
     else:
-        tests = args.tests.split[","]
+        tests = args.tests.split(",")
 
     for base in baseDirs:
-        runShear(base, out_dir, tests, clobber=args.clobber, forks=args.processes, great3=args.great3,
-             galsim=args.galsim, meas=args.meas, anal=args.anal, join=args.join)
+        runShear(base, args.out_dir, tests, clobber=args.clobber, forks=args.processes, great3=args.great3,
+             galsim=args.galsim, meas=args.meas, anal=args.anal, join=args.join,
+             subfield_start=args.subfield_start, subfield_end=args.subfield_end)
 

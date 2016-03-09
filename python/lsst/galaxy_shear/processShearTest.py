@@ -31,8 +31,8 @@ import lsst.afw.image
 import lsst.afw.math
 import lsst.meas.algorithms
 import lsst.meas.base
-from lsst.meas.base.base import MeasurementError
-from lsst.meas.base.base import FATAL_EXCEPTIONS
+from lsst.meas.base.baseLib import MeasurementError
+from lsst.meas.base.baseMeasurement import FATAL_EXCEPTIONS
 from lsst.obs.great3.processBase import *
 
 class ProcessShearTestConfig(ProcessBaseConfig):
@@ -212,8 +212,10 @@ class ProcessShearTestTask(ProcessBaseTask):
             #  Add a real footprint
             if self.config.footprintSize is None:
                 try:
-                    footprints = lsst.meas.algorithms.SourceDetectionTask().detectFootprints(exp,
-                             sigma=5.0).positive.getFootprints()
+                    task = lsst.meas.algorithms.SourceDetectionTask()
+                    task.log.setThreshold(task.log.WARN)
+                    footprints = task.detectFootprints(exp,
+                             sigma=4.0).positive.getFootprints()
                     source.set(self.footprintCountKey, len(footprints))
                     if len(footprints > 1):
                         source.setFootprint(footprints[0])
@@ -264,14 +266,14 @@ class ProcessShearTestTask(ProcessBaseTask):
                                help="data ID, e.g. --id subfield=0")
         return parser
 
-    def writeConfig(self, butler, clobber=False):
+    def writeConfig(self, butler, clobber=False, doBackup=False):
         pass
 
-    def writeSchemas(self, butler, clobber=False):
+    def writeSchemas(self, butler, clobber=False, doBackup=False):
         pass
 
-    def writeMetadata(self, dataRef):
+    def writeMetadata(self, dataRef, doBackup=False):
         pass
 
-    def writeEupsVersions(self, butler, clobber=False):
+    def writeEupsVersions(self, butler, clobber=False, doBackup=False):
         pass
