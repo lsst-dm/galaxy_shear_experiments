@@ -93,6 +93,7 @@ def writeMeasurementOverrides(tempPath, config, test, clobber):
     fout.write("config.galaxyStampSize = %d\n"%config.galaxy_stamp_size)
     fout.write("config.measPlugin = '%s'\n"%config.shape_field)
     fout.write("config.noClobber = %s\n"%(not clobber))
+    fout.write("config.psfSize = %d\n"%(config.psf_size))
     if not test is None and test[0] == 'n':
         nGrow = int(test[1:])
         fout.write('config.measurement.plugins["modelfit_CModel"].region.nGrowFootprint=%d\n'%nGrow)

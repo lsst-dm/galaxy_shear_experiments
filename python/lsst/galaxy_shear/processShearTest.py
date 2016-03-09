@@ -52,7 +52,19 @@ class ProcessShearTestConfig(ProcessBaseConfig):
         dtype=int,
         default=None,
         optional=True,
-        doc="size of footprint, if fixed"
+        doc="size of footprint, if a square is used"
+    )
+    stampSize = lsst.pex.config.Field(
+        dtype=int,
+        default=None,
+        optional=True,
+        doc="size of cutout, if reduction is desired"
+    )
+    psfSize = lsst.pex.config.Field(
+        dtype=int,
+        default=None,
+        optional=True,
+        doc="size of cutout, if reduction is desired"
     )
     noClobber = lsst.pex.config.Field(
         dtype=bool,
@@ -79,7 +91,6 @@ class ProcessShearTestTask(ProcessBaseTask):
             type = int, doc = "index of psf within library")
         self.psfNumberKey = self.schema.addField("psf_number",
             type = int, doc = "number of psf_nnnn.fits")
-
         self.g1Key = self.schema.addField("g1", type = float,
             doc = "GalSim constant g1 value")
         self.g2Key = self.schema.addField("g2", type = float,
@@ -134,14 +145,8 @@ class ProcessShearTestTask(ProcessBaseTask):
             sourceRecord.set(self.g1Key, simRecord.get("g1"))
             sourceRecord.set(self.g2Key, simRecord.get("g2"))
             position = lsst.afw.geom.Point2I(simRecord.get(xKey), simRecord.get(yKey))
-            footprintSize = self.config.footprintSize
-            # if the footprintSize is set, use it as the dimension of the bounding box
-            if not footprintSize is None:
-                offset = lsst.afw.geom.Extent2I((footprintSize/2)-1, (footprintSize/2)-1)
-                dims = lsst.afw.geom.Extent2I(footprintSize, footprintSize)
-            else:
-                dims = self.dims
-            bbox = lsst.afw.geom.Box2I(position - offset, dims)
+            # the default footprint is the entire rectangle produced by GalSim
+            bbox = lsst.afw.geom.Box2I(position - offset, self.dims)
             footprint = lsst.afw.detection.Footprint(bbox, imageBBox)
             peakRecord = footprint.getPeaks().addNew()
             peakRecord.setFx(position.getX())
@@ -174,7 +179,6 @@ class ProcessShearTestTask(ProcessBaseTask):
             g1 = sourceCat[0].get(self.g1Key)
             g2 = sourceCat[0].get(self.g2Key)
             theta0 = 180.0*math.atan2(g2,g1)/2.0*math.pi
-
         for source in sourceCat:
             #   Locate the psb_library and get the indexed psf
             dataRef.dataId["psf_index"] = source.get("psf_index")
@@ -185,11 +189,15 @@ class ProcessShearTestTask(ProcessBaseTask):
             else:
                 print "loading Library %d, for psfnumber %d"%(source.get("psf_library"),
                     source.get("psf_number"))
-
                 psf_file = dataRef.get("psf_library", immediate=True)
             data = psf_file.getArray().astype(numpy.float64)
+            if not self.config.psfSize is None and data.shape[0] > self.config.psfSize:
+                clip = (data.shape[0] - self.config.psfSize)/2
+                data = data[clip:data.shape[1]-clip, clip:data.shape[0]-clip]
+
             kernel = lsst.afw.math.FixedKernel(lsst.afw.image.ImageD(data))
             psf = lsst.meas.algorithms.KernelPsf(kernel)
+
             # Create a bounding box around the galaxy image of self.dims
             x = int(source.getFootprint().getCentroid().getX()+1) - (self.dims.getX()/2)
             y = int(source.getFootprint().getCentroid().getY()+1) - (self.dims.getY()/2)
@@ -203,20 +211,45 @@ class ProcessShearTestTask(ProcessBaseTask):
             calib = lsst.afw.image.Calib()
             calib.setFluxMag0((3531360874589.57, 21671681149.139))
             exp.setCalib(calib)
-
-            #  Add a real footprint
+            #  Add a real footprint unless a rectangular footprint has been requested
             if self.config.footprintSize is None:
                 try:
                     task = lsst.meas.algorithms.SourceDetectionTask()
                     task.log.setThreshold(task.log.WARN)
                     footprints = task.detectFootprints(exp,
                              sigma=4.0).positive.getFootprints()
-                    source.set(self.footprintCountKey, len(footprints))
-                    if len(footprints > 1):
+                    if len(footprints) == 1:
                         source.setFootprint(footprints[0])
+                    # find the one closest to the original centroid
+                    else:
+                        continue
+                        ds = 1000000  # absurdly large distance
+                        for i in range(len(footprints)):
+                            fpi = footprints[i]
+                            dsi = source.getFootprint().getCentroid().distanceSquared(fp.getCentroid())
+                            if dsi < ds:
+                                fp = fpi
+                                ds = dsi
+                        if math.sqrt(ds) > 2:      #multiple detection too far away
+                            continue
+                        source.setFootprint(fp)
+                    source.set(self.footprintCountKey, len(footprints))
                 except:
                     source.set(self.footprintCountKey, -1)
+            #  else make the footprint a square of the requested size
+            else:
+                bbox = source.getFootprint().getBBox()
+                shrinkAmount = (bbox.getDimensions().getX() - self.config.footprintSize)/2
+                bbox.grow(-shrinkAmount)
+                source.getFootprint().clipTo(bbox)
 
+            #  shrink the bounds of the exposure if requested:
+            if not self.config.stampSize is None:
+                x = int(source.getFootprint().getCentroid().getX()+1) - (self.config.stampSize/2)
+                y = int(source.getFootprint().getCentroid().getY()+1) - (self.config.stampSize/2)
+                bbox = lsst.afw.geom.Box2I(lsst.afw.geom.Point2I(x,y),
+                           lsst.afw.geom.Extent2I(self.config.stampSize, self.config.stampSize))
+                exp = lsst.afw.image.ExposureF(exp, bbox)
 
             #  Now do the measurements, calling the measure algorithms to increase speed
             sigma = None
