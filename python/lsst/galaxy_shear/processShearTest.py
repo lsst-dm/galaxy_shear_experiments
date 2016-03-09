@@ -40,25 +40,25 @@ class ProcessShearTestConfig(ProcessBaseConfig):
         dtype=str,
         default=None,
         optional=True,
-        doc="Name of the measurement test" 
+        doc="Name of the measurement test"
     )
     measPlugin = lsst.pex.config.Field(
         dtype=str,
         default=None,
         optional=True,
-        doc="registered name of measurement plugin" 
+        doc="registered name of measurement plugin"
     )
     footprintSize = lsst.pex.config.Field(
         dtype=int,
         default=None,
         optional=True,
-        doc="size of footprint, if fixed" 
+        doc="size of footprint, if fixed"
     )
     noClobber = lsst.pex.config.Field(
         dtype=bool,
         default=False,
         optional=True,
-        doc="Delete existing output src table?" 
+        doc="Delete existing output src table?"
     )
 
 class ProcessShearTestTask(ProcessBaseTask):
@@ -152,7 +152,7 @@ class ProcessShearTestTask(ProcessBaseTask):
     def run(self, dataRef):
         """Run a measurement algorithm on the set of sources provided by
         a GalSim catalog.  Also run a centroid algorithm if one is provided
-        This run method has a measurement task (which makes it easier to 
+        This run method has a measurement task (which makes it easier to
         setup the plugins and schema, but it does not actually use the measurement
         task, instead calling the plugins directly to improve speed and remove
         noise replacement.
@@ -216,10 +216,10 @@ class ProcessShearTestTask(ProcessBaseTask):
                         source.setFootprint(footprints[0])
                 except:
                     source.set(self.footprintCountKey, -1)
-         
+
 
             #  Now do the measurements, calling the measure algorithms to increase speed
-            sigma = None 
+            sigma = None
             try:
                 for plugin in self.measurement.plugins.keys():
                     self.measurement.plugins[plugin].measure(source, exp)

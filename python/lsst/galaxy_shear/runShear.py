@@ -119,7 +119,7 @@ def writeMeasurementOverrides(tempPath, config, test, clobber):
 def runShear(base, out_dir, tests, forks=1, clobber=1,
              great3=False, galsim=False, meas=False, anal=False, join=False,
              subfield_start=None, subfield_end=None):
- 
+
     # The config file for all shear tasks is in the base directory.
     # It should never be modified, and once it is written, it is definitive.
     config = RunShearConfig()
@@ -200,13 +200,14 @@ def runShear(base, out_dir, tests, forks=1, clobber=1,
         # If specific subfields requested, create a cgc.yaml for this range
         cgc_yaml = "cgc.yaml"
         if not subfield_start == 0 or not subfield_end == config.n_subfields - 1:
-            fin = open(cgc_yaml, "r")   
+            fin = open(cgc_yaml, "r")
             cgc_yaml = "cgc.%d_%d.yaml"%(subfield_start, subfield_end)
             fout = open(cgc_yaml, "w")
             for line in fin.read().split("\n"):
                 index = line.find("- {first: 0, last:")
                 if index > 0:
-                    line = line[0: index] + "- {first: %d, last: %d, repeat: 1, type: Sequence}"%(subfield_start, subfield_end)
+                    line = line[0: index] + "- {first: %d, last: %d, repeat: 1, type: Sequence}"%(
+                        subfield_start, subfield_end)
                 index = line.find("nfiles: ")
                 if index > 0:
                     line = line[0: index] + "nfiles: %d"%(subfield_end - subfield_start + 1)
@@ -219,13 +220,14 @@ def runShear(base, out_dir, tests, forks=1, clobber=1,
         # If specific subfields requested, create a cgc_psf.yaml for this range
         cgc_psf_yaml = "cgc_psf.yaml"
         if not subfield_start == 0 or not subfield_end == config.n_subfields - 1:
-            fin = open(cgc_psf_yaml, "r")   
+            fin = open(cgc_psf_yaml, "r")
             cgc_psf_yaml = "cgc_psf.%d_%d.yaml"%(subfield_start, subfield_end)
             fout = open(cgc_psf_yaml, "w")
             for line in fin.read().split("\n"):
                 index = line.find("- {first: 0, last:")
                 if index > 0:
-                    line = line[0: index] + "- {first: %d, last: %d, repeat: 1, type: Sequence}"%(subfield_start, subfield_end)
+                    line = line[0: index] + "- {first: %d, last: %d, repeat: 1, type: Sequence}"%(
+                        subfield_start, subfield_end)
                 index = line.find("nfiles: ")
                 if index > 0:
                     line = line[0: index] + "nfiles: %d"%(subfield_end - subfield_start + 1)
@@ -235,7 +237,7 @@ def runShear(base, out_dir, tests, forks=1, clobber=1,
         runcmd(("galsim", cgc_psf_yaml, "output.noclobber=%s"%(not clobber)),
                 stdoutname="galsim.stdout", append=True)
 
-        # this only needs to be run once, so run it with the last one 
+        # this only needs to be run once, so run it with the last one
         if subfield_end == config.n_subfields - 1:
             runcmd(("galsim", "cgc_star_test.yaml", "output.noclobber=%s"%(not clobber)),
                 stdoutname="galsim.stdout", append=True)
@@ -252,7 +254,7 @@ def runShear(base, out_dir, tests, forks=1, clobber=1,
 
             # create a processShearTest.py for this output/test directory
             # only do this once, when the out_dir is created
-           
+
             tempPath = os.path.join(src_dir, "processShearTest.py")
             if not os.path.isfile(tempPath):
                 writeMeasurementOverrides(tempPath, config, test, clobber)
@@ -260,7 +262,8 @@ def runShear(base, out_dir, tests, forks=1, clobber=1,
             while tries < 5:
                 try:
                     runcmd(("processShearTest.py", great3_dir, "-j", str(forks), "--configfile=%s"%tempPath,
-                        "--id", "subfield=%d..%d"%(subfield_start, subfield_end), "epoch=0..%d"%(config.n_epochs-1),
+                        "--id", "subfield=%d..%d"%(subfield_start, subfield_end),
+                        "epoch=0..%d"%(config.n_epochs-1),
                         "--output", src_dir
                         ), stdoutname="%s/meas.stdout"%base, append=False)
                     break
