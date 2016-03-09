@@ -159,13 +159,8 @@ class ProcessShearTestTask(ProcessBaseTask):
         """
         # The noClobber flag protects data which was already run from deletion
         if self.config.noClobber:
-            if not self.config.test is None:
-                dataRef.dataId["test"] = self.config.test
-                if dataRef.datasetExists("test_src"):
-                    return
-            else:
-                if dataRef.datasetExists("src"):
-                    return
+            if dataRef.datasetExists("src"):
+                return
         exposure = self.buildExposure(dataRef)
         sourceCat = self.buildSourceCatalog(exposure.getBBox(lsst.afw.image.PARENT), dataRef)
         images_file = dataRef.get("image", immediate=True)
@@ -253,11 +248,7 @@ class ProcessShearTestTask(ProcessBaseTask):
             while theta > 90.0:
                 theta = theta-90.0
 
-        if not self.config.test is None:
-            dataRef.dataId["test"] = self.config.test
-            dataRef.put(sourceCat, "test_src")
-        else:
-            dataRef.put(sourceCat, "src")
+        dataRef.put(sourceCat, "src")
 
     @classmethod
     def _makeArgumentParser(cls):
