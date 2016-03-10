@@ -1,4 +1,4 @@
-/#!/usr/bin/env python
+#!/usr/bin/env python
 #
 # LSST Data Management System
 # Copyright 20082014 LSST Corporation.
@@ -23,6 +23,7 @@
 
 import math
 import numpy
+import time
 import lsst.daf.base
 import lsst.pex.config
 import lsst.pipe.base
@@ -85,12 +86,20 @@ class ProcessShearTestTask(ProcessBaseTask):
 
     def __init__(self, **kwds):
         ProcessBaseTask.__init__(self, **kwds)
+        self.xKey = self.schema.addField("x", type = float,
+            doc = "x position from epoch catalog")
+        self.yKey = self.schema.addField("y", type = float,
+            doc = "y position from epoch catalog")
         self.psfLibraryKey = self.schema.addField("psf_library",
             type = int, doc = "number of psf library")
         self.psfIndexKey = self.schema.addField("psf_index",
             type = int, doc = "index of psf within library")
         self.psfNumberKey = self.schema.addField("psf_number",
             type = int, doc = "number of psf_nnnn.fits")
+        self.bulgeThetaKey = self.schema.addField("bulge_theta", type = float,
+            doc = "bulge rotation angle")
+        self.diskThetaKey = self.schema.addField("disk_theta", type = float,
+            doc = "disk rotation angle")
         self.g1Key = self.schema.addField("g1", type = float,
             doc = "GalSim constant g1 value")
         self.g2Key = self.schema.addField("g2", type = float,
@@ -139,7 +148,14 @@ class ProcessShearTestTask(ProcessBaseTask):
         simCat = dataRef.get("epoch_catalog", immediate=True)
         xKey = simCat.schema.find('x').key
         yKey = simCat.schema.find('y').key
+        psfIndexKey = simCat.schema.find('psf_index').key
+        psfLibraryKey = simCat.schema.find('psf_library').key
+        psfNumberKey = simCat.schema.find('psf_number').key
+        bulgeBetaRadiansKey = simCat.schema.find('bulge_beta_radians').key
+        diskBetaRadiansKey = simCat.schema.find('disk_beta_radians').key
         idKey = simCat.schema.find('ID').key
+        g1Key = simCat.schema.find('g1').key
+        g2Key = simCat.schema.find('g2').key
         nGals = imageBBox.getWidth() // self.config.galaxyStampSize
         assert nGals * self.config.galaxyStampSize == imageBBox.getWidth()
         n = imageBBox.getWidth() / nGals
@@ -147,12 +163,16 @@ class ProcessShearTestTask(ProcessBaseTask):
         offset = lsst.afw.geom.Extent2I(simCat[0][xKey], simCat[0][yKey])
         for simRecord in simCat:
             sourceRecord = sourceCat.addNew()
+            sourceRecord.set(self.xKey, simRecord.get(xKey))
+            sourceRecord.set(self.yKey, simRecord.get(yKey))
             sourceRecord.setId(simRecord.get(idKey))
-            sourceRecord.set(self.psfIndexKey, simRecord.get("psf_index"))
-            sourceRecord.set(self.psfLibraryKey, simRecord.get("psf_library"))
-            sourceRecord.set(self.psfNumberKey, simRecord.get("psf_number"))
-            sourceRecord.set(self.g1Key, simRecord.get("g1"))
-            sourceRecord.set(self.g2Key, simRecord.get("g2"))
+            sourceRecord.set(self.psfIndexKey, simRecord.get(psfIndexKey))
+            sourceRecord.set(self.psfLibraryKey, simRecord.get(psfLibraryKey))
+            sourceRecord.set(self.psfNumberKey, simRecord.get(psfNumberKey))
+            sourceRecord.set(self.bulgeThetaKey, simRecord.get(bulgeBetaRadiansKey))
+            sourceRecord.set(self.diskThetaKey, simRecord.get(diskBetaRadiansKey))
+            sourceRecord.set(self.g1Key, simRecord.get(g1Key))
+            sourceRecord.set(self.g2Key, simRecord.get(g2Key))
             position = lsst.afw.geom.Point2I(simRecord.get(xKey), simRecord.get(yKey))
             # the default footprint is the entire rectangle produced by GalSim
             bbox = lsst.afw.geom.Box2I(position - offset, self.dims)
@@ -171,6 +191,7 @@ class ProcessShearTestTask(ProcessBaseTask):
         task, instead calling the plugins directly to improve speed and remove
         noise replacement.
         """
+        startTime = time.time()
         # The noClobber flag protects data which was already run from deletion
         if self.config.noClobber:
             if dataRef.datasetExists("src"):
@@ -195,9 +216,9 @@ class ProcessShearTestTask(ProcessBaseTask):
         for source in sourceCat:
             #   Locate the psb_library and get the indexed psf but only if the Psf has changed
             if not self.comparePsfIds(lastRecord, source):
-                dataRef.dataId["psf_index"] = source.get("psf_index")
-                dataRef.dataId["psf_library"] = source.get("psf_library")
-                dataRef.dataId["psf_number"] = source.get("psf_number")
+                dataRef.dataId["psf_index"] = source.get(self.psfIndexKey)
+                dataRef.dataId["psf_library"] = source.get(self.psfLibraryKey)
+                dataRef.dataId["psf_number"] = source.get(self.psfNumberKey)
                 if dataRef.datasetExists("psf_file"):
                     psf_file = dataRef.get("psf_file", immediate=True)
                 else:
@@ -212,6 +233,7 @@ class ProcessShearTestTask(ProcessBaseTask):
                 kernel = lsst.afw.math.FixedKernel(lsst.afw.image.ImageD(data))
                 psf = lsst.meas.algorithms.KernelPsf(kernel)
             lastRecord = source
+
             # Create a bounding box around the galaxy image of self.dims
             x = int(source.getFootprint().getCentroid().getX()+1) - (self.dims.getX()/2)
             y = int(source.getFootprint().getCentroid().getY()+1) - (self.dims.getY()/2)
@@ -225,6 +247,7 @@ class ProcessShearTestTask(ProcessBaseTask):
             calib = lsst.afw.image.Calib()
             calib.setFluxMag0((3531360874589.57, 21671681149.139))
             exp.setCalib(calib)
+
             #  Add a real footprint unless a rectangular footprint has been requested
             if self.config.footprintSize is None:
                 try:
@@ -267,6 +290,9 @@ class ProcessShearTestTask(ProcessBaseTask):
 
             #  Now do the measurements, calling the measure algorithms to increase speed
             sigma = None
+            if count % 1000 == 0:
+                self.log.warn("Measuring subfield %d, count = %d"%(dataRef.dataId["subfield"], count))
+            count = count + 1
             try:
                 for plugin in self.measurement.plugins.keys():
                     # optmize by not calling SPA if Psf same as lastSPARecord
@@ -284,10 +310,11 @@ class ProcessShearTestTask(ProcessBaseTask):
             except FATAL_EXCEPTIONS:
                 raise
             except MeasurementError as error:
+                self.log.warn("Error occured in %s measurement, count = %d"%(plugin, count))
                 self.measurement.plugins[plugin].fail(source, error)
             except Exception as error:
                 self.log.warn("Error in %s.measure on record %s: %s"
-                              % (self.measurement.plugins[plugin].name, source.getId(), error))
+                          % (self.measurement.plugins[plugin].name, source.getId(), error))
             if not self.e1Key is None:
                 e1 = source.get(self.e1Key)
                 e2 = source.get(self.e2Key)
@@ -307,6 +334,7 @@ class ProcessShearTestTask(ProcessBaseTask):
                 theta = theta-90.0
 
         dataRef.put(sourceCat, "src")
+        self.log.warn("Elapsed time = %f secs."%(time.time()-startTime))
 
     @classmethod
     def _makeArgumentParser(cls):
