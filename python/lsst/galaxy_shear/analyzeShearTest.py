@@ -99,6 +99,9 @@ def runAnal(baseDir, outFile, config, test=None):
     e2AvgSumSq = 0.0
     weightSum = 0.0
     nAvgs = 0
+    flagKeys = []
+    flagNames = []
+    flagCount = []
 
     for subfield in range(config.n_subfields):
         for epoch in range(config.n_epochs):
@@ -124,7 +127,13 @@ def runAnal(baseDir, outFile, config, test=None):
                 print "src.fits file does not exist for %03d"%subfield
                 continue
             sourceCat = afwTable.BaseCatalog.readFits(sourceFile)
-
+            # make a list of all the error flags
+            if len(flagCount) == 0:
+                for name in sourceCat.getSchema().getNames():
+                    if name.find("_flag") > 0:
+                        flagKeys.append(sourceCat.getSchema().find(name).getKey())
+                        flagCount.append(0)
+                        flagNames.append(name)
             # save g1,g2 for later printouts
             #  These are constant values per subfield recorded by galsim
             if len(sourceCat) > 0:
@@ -154,6 +163,9 @@ def runAnal(baseDir, outFile, config, test=None):
 
             #   Now loop through the catalog and summarize the ellipticity measurements
             for source in sourceCat:
+                for i, key in enumerate(flagKeys):
+                    if source.get(key):
+                        flagCount[i] = flagCount[i] + 1
                 if shape_type == "ellipticity":
                     e1 = source.get(e1Key)
                     e2 = source.get(e2Key)
@@ -195,8 +207,8 @@ def runAnal(baseDir, outFile, config, test=None):
                  e1Stddev = math.sqrt(catE1SumSq/catWeightSum - e1Avg*e1Avg)/math.sqrt(catWeightSum)
                  e2Stddev = math.sqrt(catE2SumSq/catWeightSum - e2Avg*e2Avg)/math.sqrt(catWeightSum)
                  eStddev = math.sqrt(catESumSq/catWeightSum - eAvg*eAvg)
-                 print "%03d: (%d good) e1=%.4f +-%.4f, e2=%.4f +-%.4f, g=%.3f, (%.3f,%.3f)"%(
-                       subfield, catCount, e1Avg, e1Stddev, e2Avg, e2Stddev,
+                 print "%d galaxies weight %f.2: e1=%.4f +-%.4f, e2=%.4f +-%.4f, g=%.3f, (%.3f,%.3f)"%(catCount,
+                        catWeightSum, e1Avg, e1Stddev, e2Avg, e2Stddev,
                         math.sqrt(g1*g1 + g2*g2), g1, g2)
 
                  #   And append to the output fits file
@@ -227,6 +239,9 @@ def runAnal(baseDir, outFile, config, test=None):
                  weightSum = weightSum + catWeightSum
     outCat.writeFits(os.path.join(baseDir, outFile))
     print "Total from all subfields: %d measured out of %d, %d had a nan measuremnt"%(count, allCount, nanCount)
+    for i in range(len(flagCount)):
+        if flagCount[i] > 0:
+            print flagNames[i], ": ", flagCount[i]
 
 if __name__ == "__main__":
 #   analyzeShearTest main program:
