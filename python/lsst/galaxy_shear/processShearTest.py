@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+/#!/usr/bin/env python
 #
 # LSST Data Management System
 # Copyright 20082014 LSST Corporation.
@@ -98,6 +98,15 @@ class ProcessShearTestTask(ProcessBaseTask):
         self.footprintCountKey = self.schema.addField("footprintCount", type = int,
             doc = "Number of footprint detected at 5 sigma")
 
+    # Compare the identifiers in the catalog to see if two records have the same Psf
+    def comparePsfIds(self, record1, record2):
+        if not record1 is None and not record2 is None:
+            if record1.get(self.psfLibraryKey) == record2.get(self.psfLibraryKey):
+                if record1.get(self.psfIndexKey) == record2.get(self.psfIndexKey):
+                    if record1.get(self.psfNumberKey) == record2.get(self.psfNumberKey):
+                        return True
+        return False
+
     def buildSourceCatalog(self, imageBBox, dataRef):
         """Build an empty source catalog, using the provided sim catalog's position to generate
         square Footprints and its ID to set that of the source catalog. Also Transfer information
@@ -179,25 +188,30 @@ class ProcessShearTestTask(ProcessBaseTask):
             g1 = sourceCat[0].get(self.g1Key)
             g2 = sourceCat[0].get(self.g2Key)
             theta0 = 180.0*math.atan2(g2,g1)/2.0*math.pi
+        lastRecord = None
+        lastSPARecord = None
+        # Dictionary of keys for Psf Modeling Fields
+        psfApproxKeys = sourceCat.getSchema().extract("*modelfit_ShapeletPsfApprox*").keys()
         for source in sourceCat:
-            #   Locate the psb_library and get the indexed psf
-            dataRef.dataId["psf_index"] = source.get("psf_index")
-            dataRef.dataId["psf_library"] = source.get("psf_library")
-            dataRef.dataId["psf_number"] = source.get("psf_number")
-            if dataRef.datasetExists("psf_file"):
-                psf_file = dataRef.get("psf_file", immediate=True)
-            else:
-                print "loading Library %d, for psfnumber %d"%(source.get("psf_library"),
-                    source.get("psf_number"))
-                psf_file = dataRef.get("psf_library", immediate=True)
-            data = psf_file.getArray().astype(numpy.float64)
-            if not self.config.psfSize is None and data.shape[0] > self.config.psfSize:
-                clip = (data.shape[0] - self.config.psfSize)/2
-                data = data[clip:data.shape[1]-clip, clip:data.shape[0]-clip]
+            #   Locate the psb_library and get the indexed psf but only if the Psf has changed
+            if not self.comparePsfIds(lastRecord, source):
+                dataRef.dataId["psf_index"] = source.get("psf_index")
+                dataRef.dataId["psf_library"] = source.get("psf_library")
+                dataRef.dataId["psf_number"] = source.get("psf_number")
+                if dataRef.datasetExists("psf_file"):
+                    psf_file = dataRef.get("psf_file", immediate=True)
+                else:
+                    print "loading Library %d, for psfnumber %d"%(source.get("psf_library"),
+                        source.get("psf_number"))
+                    psf_file = dataRef.get("psf_library", immediate=True)
+                data = psf_file.getArray().astype(numpy.float64)
+                if not self.config.psfSize is None and data.shape[0] > self.config.psfSize:
+                    clip = (data.shape[0] - self.config.psfSize)/2
+                    data = data[clip:data.shape[1]-clip, clip:data.shape[0]-clip]
 
-            kernel = lsst.afw.math.FixedKernel(lsst.afw.image.ImageD(data))
-            psf = lsst.meas.algorithms.KernelPsf(kernel)
-
+                kernel = lsst.afw.math.FixedKernel(lsst.afw.image.ImageD(data))
+                psf = lsst.meas.algorithms.KernelPsf(kernel)
+            lastRecord = source
             # Create a bounding box around the galaxy image of self.dims
             x = int(source.getFootprint().getCentroid().getX()+1) - (self.dims.getX()/2)
             y = int(source.getFootprint().getCentroid().getY()+1) - (self.dims.getY()/2)
@@ -255,7 +269,18 @@ class ProcessShearTestTask(ProcessBaseTask):
             sigma = None
             try:
                 for plugin in self.measurement.plugins.keys():
+                    # optmize by not calling SPA if Psf same as lastSPARecord
+                    if plugin.find("modelfit_ShapeletPsfApprox") >= 0:
+                        if self.comparePsfIds(source, lastSPARecord):
+                            for key in psfApproxKeys:
+                                source.set(key, lastSPARecord.get(key))
+                            continue
                     self.measurement.plugins[plugin].measure(source, exp)
+
+                    # Save the last successfule SPA record
+                    if plugin.find("modelfit_ShapeletPsfApprox") >= 0:
+                        lastSPARecord = source
+
             except FATAL_EXCEPTIONS:
                 raise
             except MeasurementError as error:
