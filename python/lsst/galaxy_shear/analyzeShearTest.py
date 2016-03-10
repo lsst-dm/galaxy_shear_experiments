@@ -50,7 +50,8 @@ def runAnal(baseDir, outFile, config, test=None):
     schema = afwTable.Schema()
     filterKey = schema.addField("filter", type = int, doc = "filter 2 or 3 used in PhoSim psf generator.")
     seeingKey = schema.addField("seeing", type = float, doc = "raw seeing used by PhoSim.")
-    shearValueKey = schema.addField("shear_value", type = float, doc = "constant shear level used in the GalSim run.")
+    shearValueKey = schema.addField("shear_value", type = float,
+                                    doc = "constant shear level used in the GalSim run.")
     countKey = schema.addField("nsource", type = int, doc = "total number of galaxies in this run")
     gKey = schema.addField("g", type = float, doc = "g value calcuted from GalSim g1 and g2")
     g1Key = schema.addField("g1", type = float, doc = "g value calcuted from GalSim g1 and g2")
@@ -117,7 +118,7 @@ def runAnal(baseDir, outFile, config, test=None):
             catE1SumSq = 0.0
             catE2SumSq = 0.0
 
-            # Open the src.fits file for the current subfield and epoch. 
+            # Open the src.fits file for the current subfield and epoch.
             if not test is None:
                 sourceFile = os.path.join(os.path.join(baseDir, test), "src-%03d.fits"%subfield)
             else:
@@ -189,7 +190,7 @@ def runAnal(baseDir, outFile, config, test=None):
                     weight = 1.0/(.25*.25 + sigma*sigma)
                 #   Discard nans
                 if not e >= 0 and not e <= 0:
-                    nanCount = nanCount + 1 
+                    nanCount = nanCount + 1
                 else:
                     catWeightSum = catWeightSum + weight
                     catESum = catESum + (e * weight)
@@ -207,7 +208,7 @@ def runAnal(baseDir, outFile, config, test=None):
                  e1Stddev = math.sqrt(catE1SumSq/catWeightSum - e1Avg*e1Avg)/math.sqrt(catWeightSum)
                  e2Stddev = math.sqrt(catE2SumSq/catWeightSum - e2Avg*e2Avg)/math.sqrt(catWeightSum)
                  eStddev = math.sqrt(catESumSq/catWeightSum - eAvg*eAvg)
-                 print "%d galaxies weight %f.2: e1=%.4f +-%.4f, e2=%.4f +-%.4f, g=%.3f, (%.3f,%.3f)"%(catCount,
+                 print "%d good weight %f.2: e1=%.4f +-%.4f, e2=%.4f +-%.4f, g=%.3f, (%.3f,%.3f)"%(catCount,
                         catWeightSum, e1Avg, e1Stddev, e2Avg, e2Stddev,
                         math.sqrt(g1*g1 + g2*g2), g1, g2)
 
@@ -238,7 +239,8 @@ def runAnal(baseDir, outFile, config, test=None):
                  allCount = allCount + len(sourceCat)
                  weightSum = weightSum + catWeightSum
     outCat.writeFits(os.path.join(baseDir, outFile))
-    print "Total from all subfields: %d measured out of %d, %d had a nan measuremnt"%(count, allCount, nanCount)
+    print "Total from all subfields: %d measured out of %d, %d had a nan measuremnt"%(count,
+           allCount, nanCount)
     for i in range(len(flagCount)):
         if flagCount[i] > 0:
             print flagNames[i], ": ", flagCount[i]
