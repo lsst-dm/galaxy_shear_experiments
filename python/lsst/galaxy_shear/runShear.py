@@ -86,7 +86,9 @@ def runcmd(args,env=None,stdoutname=None,stderrname=None,append=True):
     return
 
 #  Write overrides to the processShearTest.py for this output directory
-
+#  processShearTest.py is the --configfile when running lsst/galaxy_shear/processShearTest.py
+#  from the pipe_base framework.  This file is written only once per output directory, and
+#  should contain all of the settings needed for a given test.
 def writeMeasurementOverrides(tempPath, config, test, clobber):
     shutil.copy("processShearTest.py", tempPath)
     fout = open(tempPath, "a")
@@ -94,29 +96,37 @@ def writeMeasurementOverrides(tempPath, config, test, clobber):
     fout.write("config.measPlugin = '%s'\n"%config.shape_field)
     fout.write("config.noClobber = %s\n"%(not clobber))
     fout.write("config.psfSize = %d\n"%(config.psf_size))
+    if not test is None:
+        fout.write('config.test="%s"\n'%test)
+    # for nGrowFootprint tests
     if not test is None and test[0] == 'n':
         nGrow = int(test[1:])
         fout.write('config.measurement.plugins["modelfit_CModel"].region.nGrowFootprint=%d\n'%nGrow)
-    if not test is None:
-        fout.write('config.test="%s"\n'%test)
+    # for stampSize tests
     if not test is None and test[0] == 's':
         stampSize = int(test[1:])
         fout.write('config.measurement.plugins["modelfit_CModel"].region.nInitialRadii=0\n')
         fout.write('config.stampSize=%d\n'%stampSize)
         fout.write('config.measurement.plugins["modelfit_CModel"].region.nGrowFootprint=0\n')
         fout.write('config.measurement.plugins["modelfit_CModel"].region.maxBadPixelFraction=.5\n')
+    # for nInitialRadaii tests
     if not test is None and test[0] == 'r':
         nInitialRadii = float(test[1:])
         fout.write('config.measurement.plugins["modelfit_CModel"].region.nInitialRadii=%.1f\n'%nInitialRadii)
         fout.write('config.measurement.plugins["modelfit_CModel"].region.nGrowFootprint=0\n')
+    # for ShapeletPsfApprox tests
     if not test is None and test[0] == 'a':
         model = test[1:]
         fout.write('model = "%s"\n'%(model,))
         fout.write('config.measurement.plugins["modelfit_ShapeletPsfApprox"].sequence=[model]\n')
         fout.write('config.measurement.plugins["modelfit_CModel"].psfName=model\n')
-        fout.write('config.measurement.plugins["modelfit_ShapeletPsfApprox"].models[model].optimizer.maxOuterIterations = 3000\n')
+        fout.write('config.measurement.plugins["modelfit_ShapeletPsfApprox"]' + 
+                   '.models[model].optimizer.maxOuterIterations = 3000\n')
     fout.close()
 
+# Main routine for performing all the required tasks (great3, galsim, meas, anal, and join).
+# basedir is the directory containing the galsim catalogs. configuration is in basedir/shear.config
+# out_dir is the location where the measurement outputs are stored
 def runShear(base, out_dir, tests, forks=1, clobber=1,
              great3=False, galsim=False, meas=False, anal=False, join=False,
              subfield_start=None, subfield_end=None):
@@ -137,6 +147,9 @@ def runShear(base, out_dir, tests, forks=1, clobber=1,
         out_dir = base
 
     pidlist = []
+
+    # Call great3sims to build the yaml files and epoch_catalogs,
+    #  which gives galsim all the required instructions.
     if great3:
         # Initialize the great3 dir prior to building the epoch_catalogs
         if os.path.isdir(great3_dir):
@@ -164,7 +177,7 @@ def runShear(base, out_dir, tests, forks=1, clobber=1,
         constants.deep_frac = 0.0
         subfield_max = constants.n_subfields + constants.n_deep_subfields - 1
 
-        # Now run great3 to build the catalogs
+        # Now call great3 to build the catalogs
         if forks > 1:
             if len(pidlist) >= forks:
                 waitforpids(pidlist, waitutil=forks-1)
@@ -190,15 +203,15 @@ def runShear(base, out_dir, tests, forks=1, clobber=1,
                 shear_value=config.shear_value,
                 shear_angle=config.shear_angle
             )
-
     waitforpids(pidlist)
 
+    # Call galsim, using the output from great3
     if galsim:
         cwd = os.getcwd()
         os.chdir(base)
         print "output.noclobber=%s"%(not clobber)
 
-        # If specific subfields requested, create a cgc.yaml for this range
+        # If specific subfields requested, create a cgc.yaml for this range of subfields only
         cgc_yaml = "cgc.yaml"
         if not subfield_start == 0 or not subfield_end == config.n_subfields - 1:
             fin = open(cgc_yaml, "r")
@@ -218,7 +231,7 @@ def runShear(base, out_dir, tests, forks=1, clobber=1,
         runcmd(("galsim", cgc_yaml, "output.noclobber=%s"%(not clobber)),
                 stdoutname="galsim.stdout", append=False)
 
-        # If specific subfields requested, create a cgc_psf.yaml for this range
+        # If specific subfields requested, create a cgc_psf.yaml for this range of subfields only
         cgc_psf_yaml = "cgc_psf.yaml"
         if not subfield_start == 0 or not subfield_end == config.n_subfields - 1:
             fin = open(cgc_psf_yaml, "r")
@@ -238,12 +251,13 @@ def runShear(base, out_dir, tests, forks=1, clobber=1,
         runcmd(("galsim", cgc_psf_yaml, "output.noclobber=%s"%(not clobber)),
                 stdoutname="galsim.stdout", append=True)
 
-        # this only needs to be run once, so run it with the last one
+        # starfield stuff only needs to be run once, so run it with the last subfield
         if subfield_end == config.n_subfields - 1:
             runcmd(("galsim", "cgc_star_test.yaml", "output.noclobber=%s"%(not clobber)),
                 stdoutname="galsim.stdout", append=True)
         os.chdir(cwd)
 
+    # Apply the required measurement algorithm
     if meas:
         for test in tests:
             if test is None:
@@ -255,10 +269,12 @@ def runShear(base, out_dir, tests, forks=1, clobber=1,
 
             # create a processShearTest.py for this output/test directory
             # only do this once, when the out_dir is created
-
             tempPath = os.path.join(src_dir, "processShearTest.py")
             if not os.path.isfile(tempPath):
                 writeMeasurementOverrides(tempPath, config, test, clobber)
+
+            # This code is to attempt to run the measurement algorithm multiple times
+            # In the event of failure.
             tries = 0
             while tries < 5:
                 try:
@@ -271,6 +287,9 @@ def runShear(base, out_dir, tests, forks=1, clobber=1,
                 except:
                     tries = tries + 1
                     continue
+
+    # Create a file called anal.fits or with the test name appended.
+    # This file summarizes the measurement statistics for each subfield
     if anal:
         for test in tests:
             outfile = "anal.fits"
@@ -295,6 +314,9 @@ def runShear(base, out_dir, tests, forks=1, clobber=1,
         if forks > 1:
             waitforpids(pidlist)
 
+    # A subfield is assumed to have a single constant shear value (g1,g2).  However, some
+    # subfields were run with multiple subfields with the same (g1,g2).  This code joins
+    # multiple runs together.
     if join:
         outCat = None
         for test in tests:
@@ -310,9 +332,18 @@ if __name__ == "__main__":
     """
     This main program reads data for multiple runs in filter, seeing, and shear value, and
 
+    runShear can be run by first creating a "base" directory containing a shear.config
+        e.g. runShear -b base
+
+    or by explicitly specifying the filter, seeing, and shear values, and letting the program
+    name the output directories for you.
+        e.g runShear -f3 -s0.5,0.7,0.9 -v0.01,0.1,0.2
+
     filter                runs with the specified filter
     seeing_values         runs with the specified seeing
     shear_values          runs with the specified shear values
+
+    The tasks allowed are -3(great3sims) -g(galsim) -m(measure) -a(analyze) -j(join analysis files)
     """
 
     parser = argparse.ArgumentParser()
@@ -328,18 +359,18 @@ if __name__ == "__main__":
     parser.add_argument("-x", "--subfield_start", type=int, help="start on specific subfield", default=None)
     parser.add_argument("-y", "--subfield_end", type=int, help="end on specific subfield", default=None)
     parser.add_argument("-t", "--tests", help="run on specific data subsets")
-    parser.add_argument("-p", "--processes", help="Number of forks, max", type = int, default=1)
-    parser.add_argument("-3", "--great3", action='store_true', help="run great3sims")
-    parser.add_argument("-g", "--galsim", action='store_true', help="run galsim")
-    parser.add_argument("-m", "--meas", action='store_true', help="run measurement algorithm")
-    parser.add_argument("-a", "--anal", action='store_true', help="run analysis program")
-    parser.add_argument("-j", "--join", action='store_true', help="join analysis runs")
+    parser.add_argument("-p", "--processes", help="Maximum umber of forks to allow", type = int, default=1)
+    parser.add_argument("-3", "--great3", action='store_true',
+                         help="run great3sims to create yamls and epoch_catalogs")
+    parser.add_argument("-g", "--galsim", action='store_true', help="run galsim to create galaxy image.fits")
+    parser.add_argument("-m", "--meas", action='store_true', help="measure image.fits, result in src.fits")
+    parser.add_argument("-a", "--anal", action='store_true', help="Analyze src.fits, result in anal.fits")
+    parser.add_argument("-j", "--join", action='store_true', help="join multiple anal.fits to sum_anal.fits")
 
     args = parser.parse_args()
 
     #   open the config file for this run in case we need to initialize
-    #   if the config file already exists, we assume that it is correct
-    #   and do not overwrite it.
+    #   if the config file already exists, we assume that it is correct and do not overwrite it.
     config = RunShearConfig()
     config.load("shear.config")
     if not args.filter is None:
@@ -347,7 +378,6 @@ if __name__ == "__main__":
     if not args.seeing is None:
         config.seeing = args.seeing
 
-    #  See if this is a multiple run or a single base
     if not args.base is None and not args.shear_values is None:
         print "Cannot set both a base directory and a set of filter, seeing, and shear values."
         sys.exit(1)
@@ -356,7 +386,11 @@ if __name__ == "__main__":
         sys.exit(1)
 
     baseDirs = []
-    #  If list of shear_values are provided, create directories named with filter, seein, shear.
+    #  See if this is a multiple run of various shear and seeing values, or a single base directory.
+    #  In either case, create the base directories required.
+    #  Also, create a shear.config if one does not already exist.
+
+    #  If list of shear_values are provided, create directories named with filter, seeing, & shear.
     if not args.shear_values is None:
         for shear_value in args.shear_values.split(","):
             base = 'f%d_%.1f_%s'%(config.filter, config.seeing, shear_value)
@@ -378,6 +412,7 @@ if __name__ == "__main__":
     else:
         tests = args.tests.split(",")
 
+    # Now run runShear on the requested tasks, one time for each base directory created.
     for base in baseDirs:
         runShear(base, args.out_dir, tests, clobber=args.clobber, forks=args.processes, great3=args.great3,
              galsim=args.galsim, meas=args.meas, anal=args.anal, join=args.join,

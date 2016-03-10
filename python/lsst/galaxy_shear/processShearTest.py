@@ -200,7 +200,8 @@ class ProcessShearTestTask(ProcessBaseTask):
         sourceCat = self.buildSourceCatalog(exposure.getBBox(lsst.afw.image.PARENT), dataRef)
         images_file = dataRef.get("image", immediate=True)
         #   the GalSim catalog will provide the number of the psf_library
-        #   and the index of the hdu with the psf for each source.
+        #   and the index of the hdu with the psf for each source, and the
+        #   internal number (identifier) of the psf.
         count = 0
         e1_sum = 0.0
         e2_sum = 0.0
@@ -211,10 +212,12 @@ class ProcessShearTestTask(ProcessBaseTask):
             theta0 = 180.0*math.atan2(g2,g1)/2.0*math.pi
         lastRecord = None
         lastSPARecord = None
+        measErrors = 0
         # Dictionary of keys for Psf Modeling Fields
         psfApproxKeys = sourceCat.getSchema().extract("*modelfit_ShapeletPsfApprox*").keys()
         for source in sourceCat:
-            #   Locate the psb_library and get the indexed psf but only if the Psf has changed
+            #   Locate the psf_library and get the indexed psf but only if the Psf has changed
+            #   This will make psf loading more efficient
             if not self.comparePsfIds(lastRecord, source):
                 dataRef.dataId["psf_index"] = source.get(self.psfIndexKey)
                 dataRef.dataId["psf_library"] = source.get(self.psfLibraryKey)
@@ -226,10 +229,14 @@ class ProcessShearTestTask(ProcessBaseTask):
                         source.get("psf_number"))
                     psf_file = dataRef.get("psf_library", immediate=True)
                 data = psf_file.getArray().astype(numpy.float64)
-                if not self.config.psfSize is None and data.shape[0] > self.config.psfSize:
+                # Resize the Psf image if requested
+                if not self.config.psfSize is None:
+                    if data.shape[0] < self.config.psfSize:
+                        raise Exception("psfSize %d requested is larger than actual psf"%self.config.psfSize)
                     clip = (data.shape[0] - self.config.psfSize)/2
                     data = data[clip:data.shape[1]-clip, clip:data.shape[0]-clip]
-
+                    if lastRecord is None:
+                        self.log.warn("Psf clipped to %d x %d"%data.shape)
                 kernel = lsst.afw.math.FixedKernel(lsst.afw.image.ImageD(data))
                 psf = lsst.meas.algorithms.KernelPsf(kernel)
             lastRecord = source
@@ -240,6 +247,7 @@ class ProcessShearTestTask(ProcessBaseTask):
             bbox = lsst.afw.geom.Box2I(lsst.afw.geom.Point2I(x,y), self.dims)
             exp = lsst.afw.image.ExposureF(exposure, bbox)
             exp.setPsf(psf)
+            # Add a fake WCS and calib, just to keep all the meas_base algorithms happy
             CD = numpy.array([[5.55E-5, 0.0], [0.0, 5.55E-5]])
             crpix = lsst.afw.geom.Point2D(0.0,0.0)
             crval = lsst.afw.geom.Point2D(0.0,0.0)
@@ -288,7 +296,7 @@ class ProcessShearTestTask(ProcessBaseTask):
                            lsst.afw.geom.Extent2I(self.config.stampSize, self.config.stampSize))
                 exp = lsst.afw.image.ExposureF(exp, bbox)
 
-            #  Now do the measurements, calling the measure algorithms to increase speed
+            #  Now do the measurements, calling the measure algorithms individually to increase speed
             sigma = None
             if count % 1000 == 0:
                 self.log.warn("Measuring subfield %d, count = %d"%(dataRef.dataId["subfield"], count))
@@ -298,6 +306,7 @@ class ProcessShearTestTask(ProcessBaseTask):
                     # optmize by not calling SPA if Psf same as lastSPARecord
                     if plugin.find("modelfit_ShapeletPsfApprox") >= 0:
                         if self.comparePsfIds(source, lastSPARecord):
+                            self.log.warn("Re-using the last SPA value for %d"%count)
                             for key in psfApproxKeys:
                                 source.set(key, lastSPARecord.get(key))
                             continue
@@ -310,7 +319,7 @@ class ProcessShearTestTask(ProcessBaseTask):
             except FATAL_EXCEPTIONS:
                 raise
             except MeasurementError as error:
-                self.log.warn("Error occured in %s measurement, count = %d"%(plugin, count))
+                measErrors = measErrors + 1
                 self.measurement.plugins[plugin].fail(source, error)
             except Exception as error:
                 self.log.warn("Error in %s.measure on record %s: %s"
@@ -335,6 +344,7 @@ class ProcessShearTestTask(ProcessBaseTask):
 
         dataRef.put(sourceCat, "src")
         self.log.warn("Elapsed time = %f secs."%(time.time()-startTime))
+        self.log.warn("measError count = %d"%measErrors)
 
     @classmethod
     def _makeArgumentParser(cls):
