@@ -45,28 +45,24 @@ import lsst.afw.table as afwTable
 from lsst.galaxy_shear.shearConfig import RunShearConfig
 
 def runAnal(baseDir, outFile, config, test=None):
+
     #  Create a summary table of the src*.fits tables in baseDir
     schema = afwTable.Schema()
     filterKey = schema.addField("filter", type = int, doc = "filter 2 or 3 used in PhoSim psf generator.")
     seeingKey = schema.addField("seeing", type = float, doc = "raw seeing used by PhoSim.")
-    shearKey = schema.addField("shear", type = float, doc = "constant shear level used in the GalSim run.")
+    shearValueKey = schema.addField("shear_value", type = float, doc = "constant shear level used in the GalSim run.")
     countKey = schema.addField("nsource", type = int, doc = "total number of galaxies in this run")
     gKey = schema.addField("g", type = float, doc = "g value calcuted from GalSim g1 and g2")
     g1Key = schema.addField("g1", type = float, doc = "g value calcuted from GalSim g1 and g2")
     g2Key = schema.addField("g2", type = float, doc = "g value calcuted from GalSim g1 and g2")
     eAvgKey = schema.addField("eAvg", type = float, doc = "average e for the sources in this subfield")
     eStdKey = schema.addField("eStd", type = float, doc = "stddev e for the sources in this subfield")
-    e1DevKey = schema.addField("e1Dev", type = float, doc = "e1 deviation from g1, for nsub subfields.")
+    e1AvgKey = schema.addField("e1Avg", type = float, doc = "e1 deviation from g1, for nsub subfields.")
     e1StdKey = schema.addField("e1Std", type = float, doc = "stddev e for the sources in this subfield")
 
-    e2DevKey = schema.addField("e2Dev", type = float, doc = "e2 deviation from g2, for nsub subfields")
+    e2AvgKey = schema.addField("e2Avg", type = float, doc = "e2 deviation from g2, for nsub subfields")
     e2StdKey = schema.addField("e2Std", type = float, doc = "stddev e for the sources in this subfield")
-    eSumKey = schema.addField("eSum", type = float, doc = "weighted sum of e for all sources")
-    e1SumKey = schema.addField("e1Sum", type = float, doc = "weighted sum of e1 for all sources")
-    e2SumKey = schema.addField("e2Sum", type = float, doc = "weighted sum of e2 for all sources")
-    weightSumKey = schema.addField("weightSum", type = float, doc = "sum of weights for all sources")
-    outSourceCat = afwTable.BaseCatalog(schema)
-
+    outCat = afwTable.BaseCatalog(schema)
 
     #   The shape type can be "moments" or "ellipticity"
     #   If we done have an e_sigma, the signal field  tells us to extract the weighting function
@@ -91,36 +87,51 @@ def runAnal(baseDir, outFile, config, test=None):
         sigma_field = "e_sigma"
         sigma_signal_field = None
 
-    #   Use the butler to get the src.fits file for each subfield/epoch
-    butler = dafPersist.Butler(root=os.path.join(baseDir, config.exp_type + "/ground/constant"))
-
+    #  These are the "overall" accumulators (sums and counts for all catalogs)
     count = 0
-    eSum = 0.0
-    e1DevSum = 0.0
-    e2DevSum = 0.0
-    eSumSq = 0.0
-    e1DevSumSq = 0.0
-    e2DevSumSq = 0.0
+    nanCount = 0
+    allCount = 0
+    eAvgSum = 0.0
+    e1AvgSum = 0.0
+    e2AvgSum = 0.0
+    eAvgSumSq = 0.0
+    e1AvgSumSq = 0.0
+    e2AvgSumSq = 0.0
     weightSum = 0.0
     nAvgs = 0
+
     for subfield in range(config.n_subfields):
         for epoch in range(config.n_epochs):
+
+            # These are the "catalog" accumulators.  Each catalog represents a single
+            # subfield/epoch, which is essentially a single pointing with constant (g1,g2)
             catCount = 0
             catESum = 0.0
             catE1Sum = 0.0
             catE2Sum = 0.0
             catWeightSum = 0.0
+            catESumSq = 0.0
+            catE1SumSq = 0.0
+            catE2SumSq = 0.0
+
+            # Open the src.fits file for the current subfield and epoch. 
             if not test is None:
-                sourceCat = butler.get("test_src", {'subfield':subfield, 'epoch':epoch, 'test': test})
+                sourceFile = os.path.join(os.path.join(baseDir, test), "src-%03d.fits"%subfield)
             else:
-                sourceCat = butler.get("src", {'subfield':subfield, 'epoch':epoch})
+                sourceFile = os.path.join(baseDir, "src-%03d.fits"%subfield)
+            #skip any subfields where the src.fits file does not exist
+            if not os.path.exists(sourceFile):
+                print "src.fits file does not exist for %03d"%subfield
+                continue
+            sourceCat = afwTable.BaseCatalog.readFits(sourceFile)
+
+            # save g1,g2 for later printouts
+            #  These are constant values per subfield recorded by galsim
             if len(sourceCat) > 0:
                 g1 = sourceCat[0].get("g1")
                 g2 = sourceCat[0].get("g2")
 
-            #  These are constant values per subfield recorded by galsim
-
-            #   Set up the measurement keys, depending on type (moments or ellip)
+            #   Set up the measurement keys, depending on type (moments or ellipticity)
             if shape_type == "ellipticity":
                 e1Key = sourceCat.getSchema().find(shape_field + "e1").getKey()
                 e2Key = sourceCat.getSchema().find(shape_field + "e2").getKey()
@@ -154,13 +165,6 @@ def runAnal(baseDir, outFile, config, test=None):
                     e2 = 2 * xy / (xx + yy)
                 e = math.sqrt(e1 * e1 + e2 * e2)
 
-                #   Calculate the rotation in the range [-pi, pi], just to check the pairs
-                theta = math.atan2(e2,e1)/2.0
-                thetaApplied = math.atan2(g2,g1)/2.0
-                if theta >= math.pi:
-                    theta = theta - math.pi
-                if theta <= -math.pi:
-                    theta = theta + math.pi
                 if sigmaKey == None:
                     weight = 1.0
                 else:
@@ -171,89 +175,61 @@ def runAnal(baseDir, outFile, config, test=None):
                         sigmaSignal = source.get(sigmaSignalKey)
                         sigma = sigma * e / sigmaSignal
                     weight = 1.0/(.25*.25 + sigma*sigma)
-
                 #   Discard nans
                 if not e >= 0 and not e <= 0:
-                    continue
-                catWeightSum = catWeightSum + weight
-                catESum = catESum + (e * weight)
-                catE1Sum = catE1Sum + (e1 * weight)
-                catE2Sum = catE2Sum + (e2 * weight)
-                catCount = catCount + 1
-
+                    nanCount = nanCount + 1 
+                else:
+                    catWeightSum = catWeightSum + weight
+                    catESum = catESum + (e * weight)
+                    catE1Sum = catE1Sum + (e1 * weight)
+                    catE2Sum = catE2Sum + (e2 * weight)
+                    catESumSq = catESumSq + (e * e * weight)
+                    catE1SumSq = catE1SumSq + (e1 * e1 * weight)
+                    catE2SumSq = catE2SumSq + (e2 * e2 * weight)
+                    catCount = catCount + 1
             #   For each subfield/epoch, calculate averages
             if catWeightSum > 0:
                  e1Avg = catE1Sum/catWeightSum
                  e2Avg = catE2Sum/catWeightSum
-                 eAvg = math.sqrt(e1Avg*e1Avg + e2Avg*e2Avg)
-                 e1Dev = e1Avg
-                 e2Dev = e2Avg
-                 #  Add to the global sums and sums of squares
-                 eSum = eSum + eAvg
-                 eSumSq = eSumSq + eAvg * eAvg
-                 e1DevSum = e1DevSum + e1Dev
-                 e1DevSumSq = e1DevSumSq + e1Dev*e1Dev
-                 e2DevSum = e2DevSum + e2Dev
-                 e2DevSumSq = e2DevSumSq + e2Dev*e2Dev
-                 count = count + catCount
-                 weightSum = weightSum + catWeightSum
+                 eAvg = catESum/catWeightSum
+                 e1Stddev = math.sqrt(catE1SumSq/catWeightSum - e1Avg*e1Avg)/math.sqrt(catWeightSum)
+                 e2Stddev = math.sqrt(catE2SumSq/catWeightSum - e2Avg*e2Avg)/math.sqrt(catWeightSum)
+                 eStddev = math.sqrt(catESumSq/catWeightSum - eAvg*eAvg)
+                 print "%03d: (%d good) e1=%.4f +-%.4f, e2=%.4f +-%.4f, g=%.3f, (%.3f,%.3f)"%(
+                       subfield, catCount, e1Avg, e1Stddev, e2Avg, e2Stddev,
+                        math.sqrt(g1*g1 + g2*g2), g1, g2)
+
                  #   And append to the output fits file
-                 outrec = outSourceCat.addNew()
+                 outrec = outCat.addNew()
                  outrec.set(g1Key, float(g1))
                  outrec.set(g2Key, float(g2))
                  outrec.set(filterKey, config.filter)
                  outrec.set(seeingKey, config.seeing)
-                 outrec.set(shearKey, config.shear_value)
                  outrec.set(countKey, catCount)
                  outrec.set(gKey, math.sqrt(g1*g1 + g2*g2))
                  outrec.set(eAvgKey, eAvg)
-                 outrec.set(e1DevKey, e1Avg-g1)
-                 outrec.set(e2DevKey, e2Avg-g2)
-                 outrec.set(eSumKey, catESum)
-                 outrec.set(e1SumKey, catE1Sum)
-                 outrec.set(e2SumKey, catE2Sum)
-                 outrec.set(weightSumKey, catWeightSum)
+                 outrec.set(eStdKey, eStddev)
+                 outrec.set(e1StdKey, e1Stddev)
+                 outrec.set(e2StdKey, e2Stddev)
+                 outrec.set(e1AvgKey, e1Avg)
+                 outrec.set(e2AvgKey, e2Avg)
                  nAvgs = nAvgs + 1
-    outSourceCat.writeFits(os.path.join(baseDir, outFile))
-    #   Now summarize the averages and stddevs for all the subfield/epochs
-    if nAvgs > 2:
-        eStddev = math.sqrt( (nAvgs * eSumSq - eSum * eSum)/(nAvgs * (nAvgs - 1)))
-        e1Stddev = math.sqrt((nAvgs * e1DevSumSq - e1DevSum * e1DevSum)/(nAvgs * (nAvgs - 1)))
-        e2Stddev = math.sqrt((nAvgs * e2DevSumSq - e2DevSum * e2DevSum)/(nAvgs * (nAvgs - 1)))
-        print "%d subfields: e=%.4f +-%.4f, e1=%.4f +-%.4f, e2=%.4f +-%.4f, g=%.3f, (%.3f,%.3f)"%(nAvgs,
-               eSum/nAvgs, eStddev, e1DevSum/nAvgs, e1Stddev, e2DevSum/nAvgs, e2Stddev,
-               math.sqrt(g1*g1 + g2*g2), g1, g2)
-    else:
-        print "Not enough subfields to calculate error.  Subfield not added to catalog"
-        print "%d subfields: e = %.4f, e1 = %.4f, e2 = %.4f, g = %.3f"%(nAvgs,
-               eSum/nAvgs, e1DevSum/nAvgs, e2DevSum/nAvgs,
-               math.sqrt(g1*g1 + g2*g2))
 
-    sumSourceCat = afwTable.BaseCatalog(outSourceCat.getSchema())
-    sumrec = sumSourceCat.addNew()
-    sumrec.set(g1Key, float(g1))
-    sumrec.set(g2Key, float(g2))
-    sumrec.set(filterKey, config.filter)
-    sumrec.set(seeingKey, config.seeing)
-    sumrec.set(shearKey, config.shear_value)
-    sumrec.set(countKey, count)
-    sumrec.set(gKey, math.sqrt(g1*g1 + g2*g2))
-    sumrec.set(eAvgKey, eSum/nAvgs)
-    sumrec.set(eStdKey, eStddev)
-    sumrec.set(e1DevKey, e1DevSum/nAvgs)
-    sumrec.set(e1StdKey, e1Stddev)
-    sumrec.set(e2DevKey, e2DevSum/nAvgs)
-    sumrec.set(e2StdKey, e2Stddev)
-    sumrec.set(eSumKey, eSum)
-    sumrec.set(e1SumKey, e1DevSum)
-    sumrec.set(e2SumKey, e2DevSum)
-    sumrec.set(e2SumKey, catE2Sum)
-    sumrec.set(weightSumKey, weightSum)
-    sumSourceCat.writeFits(os.path.join(baseDir, "sum_" + outFile))
+                 #  Add to the global sums and sums of squares
+                 eAvgSum = eAvgSum + eAvg
+                 eAvgSumSq = eAvgSumSq + eAvg * eAvg
+                 e1AvgSum = e1AvgSum + e1Avg
+                 e1AvgSumSq = e1AvgSumSq + e1Avg*e1Avg
+                 e2AvgSum = e2AvgSum + e2Avg
+                 e2AvgSumSq = e2AvgSumSq + e2Avg*e2Avg
+                 count = count + catCount
+                 allCount = allCount + len(sourceCat)
+                 weightSum = weightSum + catWeightSum
+    outCat.writeFits(os.path.join(baseDir, outFile))
+    print "Total from all subfields: %d measured out of %d, %d had a nan measuremnt"%(count, allCount, nanCount)
 
 if __name__ == "__main__":
 #   analyzeShearTest main program:
-# 
 #   base_dir         Name of the subdirectory containing run_params file
 #   out_file         Name of the catalog for output. .fits is appended
 #   test             Name of the test directory, if this is a named test
@@ -264,13 +240,14 @@ if __name__ == "__main__":
     parser.add_argument("-t", "--test", type=str, help="Type of the test (set of source tables)",
                         default=None)
     args = parser.parse_args()
+
+    # if the output file  name is given, use it.  Otherwise, name it anal.fits or anal_test.fits
     if args.out_file is None:
         if args.test is None:
-            out_file = "subfields_" + args.test + ".fits"
+            out_file = "anal.fits"
         else:
-            out_file = "subfields.fits"
-
+            out_file = "anal_" + args.test + ".fits"
     #   open the config file for this run
     config = RunShearConfig()
-    config.load(os.path.join(base_dir, "shear.config"))
+    config.load(os.path.join(args.base_dir, "shear.config"))
     runAnal(args.base_dir, out_file, config, test=args.test)
