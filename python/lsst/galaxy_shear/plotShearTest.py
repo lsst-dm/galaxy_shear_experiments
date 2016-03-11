@@ -39,13 +39,20 @@ calculated doing mulitple subfields with the same applied shear.
 It is assumed that previous scripts have created an analysis_file which has statistical
 summaries of the shear and shear error as a function of seeing, filter, and applied shear.
 
-This program simply takes the values for a given filter and seeing, fits the points
-to a line, and graphs the measured values and errors and the regression line.
+If a single analysis file is specified, this program takes the values for that test run,
+fits the points to a line, and graphs the measured values, errors and the regression line.
+
+If multiple files are specified, it show a graph comparing m1, b1, m2, and b2 for the
+multiple test runs specified.
 """
 
 def runPlot(analysis_file, useFilter, useSeeing, useIndex=None, display=1):
 
     # input file is the analyis of a set of subfields, all from the same measurement run
+    # It must be named "anal_test.fits", where "test" is the name of a single run.
+    # By convention, "s", "n", and "r" are for the stampsize, nGrowFootprints, and nInitialRadii tests
+    # and "a" is for a particular SPA parameterization, such as "aDoubleShapelet"
+
     subfieldCat = afwTable.BaseCatalog.readFits(analysis_file)
 
     # Keys for fetching data from the output table
@@ -87,7 +94,7 @@ def runPlot(analysis_file, useFilter, useSeeing, useIndex=None, display=1):
     s2y = 0
     s2xx = 0
     s2xy = 0
- 
+
     # Go through the catalog and get the values requested in the plot
     for rec in subfieldCat:
         filter = rec.get(filterKey)
@@ -122,7 +129,7 @@ def runPlot(analysis_file, useFilter, useSeeing, useIndex=None, display=1):
             s2xy = s2xy + x2 * y2 * w2
 
     #  Now calculate the slope and intercept, as well as their errors
-    delta1 = (s1 * s1xx) - (s1x * s1x) 
+    delta1 = (s1 * s1xx) - (s1x * s1x)
     b1 = (s1xx * s1y - s1x * s1xy)/delta1
     m1 = (s1 * s1xy - s1x * s1y)/delta1
     m1err = math.sqrt(s1/delta1)
@@ -135,14 +142,15 @@ def runPlot(analysis_file, useFilter, useSeeing, useIndex=None, display=1):
     b2err = math.sqrt(s2xx/delta2)
 
     nPoints = len(g1)
-    
+
     # print the results to the console
-    print "Fits for %s %d/%d sources, m1:%.6f+-%.6f, b1: %.6f+-%.6f m2:%.6f+-%.6f b2:%.6f+-%.6f"%(analysis_file,
-        nSources, nPoints, m1, m1err, b1, b1err, m2, m2err, b2, b2err)
+    print "Fits for %s %d/%d sources, m1:%.6f+-%.6f, b1: %.6f+-%.6f m2:%.6f+-%.6f b2:%.6f+-%.6f"%(
+           analysis_file, nSources, nPoints, m1, m1err, b1, b1err, m2, m2err, b2, b2err)
     # plot a first order fit
     if display:
         import matplotlib.pyplot as plot
-        label = "Avg %.1f gals/subfield, m1=%.4f b1=%.4f, m2=%.4f b2=%.4f"%(float(nSources)/nPoints, m1, b1, m2, b2)
+        label = "Avg %.1f gals/subfield, m1=%.4f b1=%.4f, m2=%.4f b2=%.4f"%(
+                 float(nSources)/nPoints, m1, b1, m2, b2)
         g1 = numpy.array(g1, dtype=float)
         g2 = numpy.array(g2, dtype=float)
         eStd = numpy.array(eStd, dtype=float)
@@ -174,17 +182,20 @@ if __name__ == "__main__":
 #   filter                plot only runs with the specified filter
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("-a", "--analysis_file", type=str, help="Analysis fits file", default=None) 
+    parser.add_argument("-a", "--analysis_file", type=str, help="Analysis fits file", default=None)
     parser.add_argument("-t", "----test", type=str, help="type of test: s, n, r", default=None)
     parser.add_argument("-f", "--filter", type=int, help="filter to be used for plotting", default=None)
-    parser.add_argument("-b", "--index", type=int, help="index of filter to be used for plotting", default=None)
+    parser.add_argument("-b", "--index", type=int,
+                        help="index of filter to be used for plotting", default=None)
     parser.add_argument("-s", "--seeing", type=float, help="seeing to be used for plotting", default=None)
     parser.add_argument("-d", "--display", type=int, help="display the resulting plot", default=1)
     args = parser.parse_args()
     test_parameter = None
     #  If this is must a single analysis file, just display the fit
     if args.test is None:
-        nPoints, m1, m1err, b1, b1err, m2, m2err, b2, b2err = runPlot(args.analysis_file, args.filter, args.seeing, useIndex=None, display=args.display)
+        nPoints, m1, m1err, b1, b1err, m2, m2err, b2, b2err = runPlot(args.analysis_file, args.filter,
+                                                                      args.seeing, useIndex=None,
+                                                                      display=args.display)
     #  But if it is a test involving multiple runs, call runPlot multiple times, then display a graph of all the fits.
     else:
         # keep a list of number to sequence the points, and a list of labels to label the ticks
@@ -222,7 +233,9 @@ if __name__ == "__main__":
                 display = True
             else:
                 display = False
-            nPoints, m1, m1err, b1, b1err, m2, m2err, b2, b2err = runPlot(file, args.filter, args.seeing, useIndex=None, display=display)
+            nPoints, m1, m1err, b1, b1err, m2, m2err, b2, b2err = runPlot(file, args.filter,
+                                                                          args.seeing, useIndex=None,
+                                                                          display=display)
             m1s.append(m1)
             m2s.append(m2)
             b1s.append(b1)
@@ -257,10 +270,10 @@ if __name__ == "__main__":
             if not test_parameter is None:
                 figure.suptitle("Shear estimation bias vs. %s"%test_parameter)
 
-            ax1.set_title("m1", size="small") 
-            ax2.set_title("c1", size="small") 
-            ax3.set_title("m2", size="small") 
-            ax4.set_title("c2", size="small") 
+            ax1.set_title("m1", size="small")
+            ax2.set_title("c1", size="small")
+            ax3.set_title("m2", size="small")
+            ax4.set_title("c2", size="small")
 
             testnumbers = numpy.array(testnumbers, dtype=float)
             margin = (testnumbers.max() - testnumbers.min())/20.0
@@ -270,12 +283,13 @@ if __name__ == "__main__":
             m1errs = numpy.array(m1errs, dtype=float)
             m2errs = numpy.array(m2errs, dtype=float)
             # put both graphs on the same units scale
-            yrange = 2.0 * max((m1s.max() - m1s.min() + m1errs.max(), m2s.max() - m2s.min() + m2errs.max())) 
+            yrange = 2.0 * max((m1s.max() - m1s.min() + m1errs.max(), m2s.max() - m2s.min() + m2errs.max()))
             # plot the data with error bars
             ax1.set_xlim(testnumbers.min() - margin, testnumbers.max() + margin)
             ax1.set_ylim((m1s.min() + m1s.max() - yrange)/2.0, (m1s.min() + m1s.max() + yrange)/2.0)
             ax1.set_xticks([])
-            ax1.errorbar(testnumbers, m1s, yerr=m1errs, marker = ".", markersize=10, linestyle='None', color='red')
+            ax1.errorbar(testnumbers, m1s, yerr=m1errs, marker = ".", markersize=10,
+                         linestyle='None', color='red')
 
 
             ax3.set_xlim(testnumbers.min() - margin, testnumbers.max() + margin)
@@ -289,11 +303,12 @@ if __name__ == "__main__":
             b1errs = numpy.array(b1errs, dtype=float)
             b2errs = numpy.array(b2errs, dtype=float)
             # put both graphs on the same units scale
-            yrange = 2.0 * max((b1s.max() - b1s.min() + b1errs.max(), b2s.max() - b2s.min() + b2errs.max())) 
+            yrange = 2.0 * max((b1s.max() - b1s.min() + b1errs.max(), b2s.max() - b2s.min() + b2errs.max()))
             ax2.set_xlim(testnumbers.min() - margin, testnumbers.max() + margin)
             ax2.set_ylim((b1s.min() + b1s.max() - yrange)/2.0, (b1s.min() + b1s.max() + yrange)/2.0)
             ax2.set_xticks([])
-            ax2.errorbar(testnumbers, b1s, yerr=b1errs, marker = ".", markersize=10, linestyle='None', color='red')
+            ax2.errorbar(testnumbers, b1s, yerr=b1errs, marker = ".", markersize=10,
+                         linestyle='None', color='red')
 
             ax4.set_xlim(testnumbers.min() - margin, testnumbers.max() + margin)
             ax4.set_ylim((b2s.min() + b2s.max() - yrange)/2.0, (b2s.min() + b2s.max() + yrange)/2.0)
