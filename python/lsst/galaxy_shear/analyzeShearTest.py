@@ -92,14 +92,6 @@ def runAnal(baseDir, outFile, config, test=None):
     count = 0
     nanCount = 0
     allCount = 0
-    eAvgSum = 0.0
-    e1AvgSum = 0.0
-    e2AvgSum = 0.0
-    eAvgSumSq = 0.0
-    e1AvgSumSq = 0.0
-    e2AvgSumSq = 0.0
-    weightSum = 0.0
-    nAvgs = 0
     flagKeys = []
     flagNames = []
     flagCount = []
@@ -226,18 +218,10 @@ def runAnal(baseDir, outFile, config, test=None):
                  outrec.set(e2StdKey, e2Stddev)
                  outrec.set(e1AvgKey, e1Avg)
                  outrec.set(e2AvgKey, e2Avg)
-                 nAvgs = nAvgs + 1
 
-                 #  Add to the global sums and sums of squares
-                 eAvgSum = eAvgSum + eAvg
-                 eAvgSumSq = eAvgSumSq + eAvg * eAvg
-                 e1AvgSum = e1AvgSum + e1Avg
-                 e1AvgSumSq = e1AvgSumSq + e1Avg*e1Avg
-                 e2AvgSum = e2AvgSum + e2Avg
-                 e2AvgSumSq = e2AvgSumSq + e2Avg*e2Avg
                  count = count + catCount
                  allCount = allCount + len(sourceCat)
-                 weightSum = weightSum + catWeightSum
+
     outCat.writeFits(os.path.join(baseDir, outFile))
     print "Total from all subfields: %d measured out of %d, %d had a nan measuremnt"%(count,
            allCount, nanCount)
