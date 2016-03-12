@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#/!/usr/bin/env python
 #
 # LSST Data Management System
 # Copyright 2015 AURA/LSST
@@ -38,11 +38,122 @@ these samples provides an error for this estimator.
 import argparse
 import math
 import os.path
+import random
 
 import lsst.daf.persistence as dafPersist
 import lsst.afw.table as afwTable
 
 from lsst.galaxy_shear.shearConfig import RunShearConfig
+
+# do the analysis on a single source catalog, and return the statistics
+# if flagCounts is defined, an accumulator is kept of  
+
+def analyzeCat(sourceCat, config, flagCounts=None, flagKeys=None, flagNames=None):
+    #   The shape type can be "moments" or "ellipticity"
+    #   If we done have an e_sigma, the signal field  tells us to extract the weighting function
+    #   from the SNR of some other field, where the sigma will be the error, and the
+    #   The sigma used for weighting is shape_field/(sigma_field/sigma_signal_field)
+    if "shape_field" in config.keys():
+        shape_field = config.shape_field + "_"
+        shape_type = config.shape_type
+        if "sigma_field" in config.keys():
+            sigma_field = config.sigma_field
+            if "sigma_signal_field" in config.keys():
+                sigma_signal_field = config.sigma_signal_field
+            else:
+                sigma_signal_field = None
+        else:
+            sigma_field = None
+            sigma_signal_field = None
+    else:
+        #   If shape_field is not in params, the ellipticity and sigma field are here:
+        shape_field = ""
+        shape_type = "ellipticity"
+        sigma_field = "e_sigma"
+        sigma_signal_field = None
+
+    # These are the "catalog" accumulators.  Each catalog represents a single
+    # subfield/epoch, which is essentially a single pointing with constant (g1,g2)
+    catCount = 0
+    catESum = 0.0
+    catE1Sum = 0.0
+    catE2Sum = 0.0
+    catWeightSum = 0.0
+    catESumSq = 0.0
+    catE1SumSq = 0.0
+    catE2SumSq = 0.0
+    catNanCount = 0
+    #   Set up the measurement keys, depending on type (moments or ellipticity)
+    if shape_type == "ellipticity":
+        e1Key = sourceCat.getSchema().find(shape_field + "e1").getKey()
+        e2Key = sourceCat.getSchema().find(shape_field + "e2").getKey()
+    else:
+        xxKey = sourceCat.getSchema().find(shape_field + "xx").getKey()
+        yyKey = sourceCat.getSchema().find(shape_field + "yy").getKey()
+        xyKey = sourceCat.getSchema().find(shape_field + "xy").getKey()
+
+    #   If there is a sigma field, get it.  If it also has a signal field
+    #   for signal-to-noise determination, get that too
+    if sigma_field == None:
+        sigmaKey = None
+        sigmaSignalKey = None
+    else:
+        sigmaKey = sourceCat.getSchema().find(sigma_field).getKey()
+        if sigma_signal_field is None:
+            sigmaSignalKey = None
+        else:
+            sigmaSignalKey = sourceCat.getSchema().find(sigma_signal_field).getKey()
+    #   Now loop through the catalog and summarize the ellipticity measurements
+    for source in sourceCat:
+        if not flagCounts is None:
+            for i, key in enumerate(flagKeys):
+                if source.get(key):
+                    flagCounts[i] = flagCounts[i] + 1
+        if shape_type == "ellipticity":
+            e1 = source.get(e1Key)
+            e2 = source.get(e2Key)
+        else:
+            xx = source.get(xxKey)
+            yy = source.get(yyKey)
+            xy = source.get(xyKey)
+            e1 = (xx - yy) / (xx + yy)
+            e2 = 2 * xy / (xx + yy)
+        e = math.sqrt(e1 * e1 + e2 * e2)
+
+        if sigmaKey == None:
+            weight = 1.0
+        else:
+             #   Calculate the ellipticity error if fields are defined to do th
+             #   Use it to calculate the variance, assuming a .25 shape noise
+            sigma = source.get(sigmaKey)
+            if not sigmaSignalKey == None:
+                sigmaSignal = source.get(sigmaSignalKey)
+                sigma = sigma * e / sigmaSignal
+            weight = 1.0/(.25*.25 + sigma*sigma)
+        #   Discard nans
+        if not e >= 0 and not e <= 0:
+            catNanCount = catNanCount + 1
+        else:
+            catWeightSum = catWeightSum + weight
+            catESum = catESum + (e * weight)
+            catE1Sum = catE1Sum + (e1 * weight)
+            catE2Sum = catE2Sum + (e2 * weight)
+            catESumSq = catESumSq + (e * e * weight)
+            catE1SumSq = catE1SumSq + (e1 * e1 * weight)
+            catE2SumSq = catE2SumSq + (e2 * e2 * weight)
+            catCount = catCount + 1
+
+    if catCount == 0:
+        raise Exception("catalog found with no good records")
+    e1Avg = catE1Sum/catWeightSum
+    e2Avg = catE2Sum/catWeightSum
+    eAvg = catESum/catWeightSum
+    eStddev = math.sqrt(catE1SumSq/catWeightSum - e1Avg*e1Avg)/math.sqrt(catWeightSum)
+    e1Stddev = math.sqrt(catE1SumSq/catWeightSum - e1Avg*e1Avg)/math.sqrt(catWeightSum)
+    e2Stddev = math.sqrt(catE2SumSq/catWeightSum - e2Avg*e2Avg)/math.sqrt(catWeightSum)
+    print "%d good, weight %.2f: e1=%.4f +-%.4f, e2=%.4f +-%.4f"%(catCount,
+             catWeightSum, e1Avg, e1Stddev, e2Avg, e2Stddev)
+    return e1Avg, e1Stddev, e2Avg, e2Stddev, eAvg, eStddev, catCount, catNanCount
 
 def runAnal(baseDir, outFile, config, test=None):
 
@@ -60,9 +171,9 @@ def runAnal(baseDir, outFile, config, test=None):
     eStdKey = schema.addField("eStd", type = float, doc = "stddev e for the sources in this subfield")
     e1AvgKey = schema.addField("e1Avg", type = float, doc = "e1 deviation from g1, for nsub subfields.")
     e1StdKey = schema.addField("e1Std", type = float, doc = "stddev e for the sources in this subfield")
-
     e2AvgKey = schema.addField("e2Avg", type = float, doc = "e2 deviation from g2, for nsub subfields")
     e2StdKey = schema.addField("e2Std", type = float, doc = "stddev e for the sources in this subfield")
+    
     outCat = afwTable.BaseCatalog(schema)
 
     #   The shape type can be "moments" or "ellipticity"
@@ -94,21 +205,11 @@ def runAnal(baseDir, outFile, config, test=None):
     allCount = 0
     flagKeys = []
     flagNames = []
-    flagCount = []
+    flagCounts = []
 
     for subfield in range(config.n_subfields):
         for epoch in range(config.n_epochs):
 
-            # These are the "catalog" accumulators.  Each catalog represents a single
-            # subfield/epoch, which is essentially a single pointing with constant (g1,g2)
-            catCount = 0
-            catESum = 0.0
-            catE1Sum = 0.0
-            catE2Sum = 0.0
-            catWeightSum = 0.0
-            catESumSq = 0.0
-            catE1SumSq = 0.0
-            catE2SumSq = 0.0
 
             # Open the src.fits file for the current subfield and epoch.
             if not test is None:
@@ -119,115 +220,49 @@ def runAnal(baseDir, outFile, config, test=None):
             if not os.path.exists(sourceFile):
                 print "src.fits file does not exist for %03d"%subfield
                 continue
-            sourceCat = afwTable.BaseCatalog.readFits(sourceFile)
-            # make a list of all the error flags
-            if len(flagCount) == 0:
-                for name in sourceCat.getSchema().getNames():
-                    if name.find("_flag") > 0:
-                        flagKeys.append(sourceCat.getSchema().find(name).getKey())
-                        flagCount.append(0)
-                        flagNames.append(name)
+            sourceCat = afwTable.SourceCatalog.readFits(sourceFile)
             # save g1,g2 for later printouts
             #  These are constant values per subfield recorded by galsim
             if len(sourceCat) > 0:
                 g1 = sourceCat[0].get("g1")
                 g2 = sourceCat[0].get("g2")
 
-            #   Set up the measurement keys, depending on type (moments or ellipticity)
-            if shape_type == "ellipticity":
-                e1Key = sourceCat.getSchema().find(shape_field + "e1").getKey()
-                e2Key = sourceCat.getSchema().find(shape_field + "e2").getKey()
-            else:
-                xxKey = sourceCat.getSchema().find(shape_field + "xx").getKey()
-                yyKey = sourceCat.getSchema().find(shape_field + "yy").getKey()
-                xyKey = sourceCat.getSchema().find(shape_field + "xy").getKey()
+            # make a list of all the error flags
+            if len(flagCounts) == 0:
+                for name in sourceCat.getSchema().getNames():
+                    if name.find("_flag") > 0:
+                        flagKeys.append(sourceCat.getSchema().find(name).getKey())
+                        flagCounts.append(0)
+                        flagNames.append(name)
 
-            #   If there is a sigma field, get it.  If it also has a signal field
-            #   for signal-to-noise determination, get that too
-            if sigma_field == None:
-                sigmaKey = None
-                sigmaSignalKey = None
-            else:
-                sigmaKey = sourceCat.getSchema().find(sigma_field).getKey()
-                if sigma_signal_field is None:
-                    sigmaSignalKey = None
-                else:
-                    sigmaSignalKey = sourceCat.getSchema().find(sigma_signal_field).getKey()
+            (e1Avg, e1Stddev, e2Avg, e2Stddev, eAvg, eStddev, catCount, catNanCount) = \
+                analyzeCat(sourceCat, config, flagCounts, flagKeys, flagNames)
 
-            #   Now loop through the catalog and summarize the ellipticity measurements
-            for source in sourceCat:
-                for i, key in enumerate(flagKeys):
-                    if source.get(key):
-                        flagCount[i] = flagCount[i] + 1
-                if shape_type == "ellipticity":
-                    e1 = source.get(e1Key)
-                    e2 = source.get(e2Key)
-                else:
-                    xx = source.get(xxKey)
-                    yy = source.get(yyKey)
-                    xy = source.get(xyKey)
-                    e1 = (xx - yy) / (xx + yy)
-                    e2 = 2 * xy / (xx + yy)
-                e = math.sqrt(e1 * e1 + e2 * e2)
+            #   And append to the output fits file
+            outrec = outCat.addNew()
+            outrec.set(g1Key, float(g1))
+            outrec.set(g2Key, float(g2))
+            outrec.set(filterKey, config.filter)
+            outrec.set(seeingKey, config.seeing)
+            outrec.set(countKey, catCount)
+            outrec.set(gKey, math.sqrt(g1*g1 + g2*g2))
+            outrec.set(eAvgKey, eAvg)
+            outrec.set(eStdKey, eStddev)
+            outrec.set(e1StdKey, e1Stddev)
+            outrec.set(e2StdKey, e2Stddev)
+            outrec.set(e1AvgKey, e1Avg)
+            outrec.set(e2AvgKey, e2Avg)
 
-                if sigmaKey == None:
-                    weight = 1.0
-                else:
-                     #   Calculate the ellipticity error if fields are defined to do th
-                     #   Use it to calculate the variance, assuming a .25 shape noise
-                    sigma = source.get(sigmaKey)
-                    if not sigmaSignalKey == None:
-                        sigmaSignal = source.get(sigmaSignalKey)
-                        sigma = sigma * e / sigmaSignal
-                    weight = 1.0/(.25*.25 + sigma*sigma)
-                #   Discard nans
-                if not e >= 0 and not e <= 0:
-                    nanCount = nanCount + 1
-                else:
-                    catWeightSum = catWeightSum + weight
-                    catESum = catESum + (e * weight)
-                    catE1Sum = catE1Sum + (e1 * weight)
-                    catE2Sum = catE2Sum + (e2 * weight)
-                    catESumSq = catESumSq + (e * e * weight)
-                    catE1SumSq = catE1SumSq + (e1 * e1 * weight)
-                    catE2SumSq = catE2SumSq + (e2 * e2 * weight)
-                    catCount = catCount + 1
-            #   For each subfield/epoch, calculate averages
-            if catWeightSum > 0:
-                 e1Avg = catE1Sum/catWeightSum
-                 e2Avg = catE2Sum/catWeightSum
-                 eAvg = catESum/catWeightSum
-                 e1Stddev = math.sqrt(catE1SumSq/catWeightSum - e1Avg*e1Avg)/math.sqrt(catWeightSum)
-                 e2Stddev = math.sqrt(catE2SumSq/catWeightSum - e2Avg*e2Avg)/math.sqrt(catWeightSum)
-                 eStddev = math.sqrt(catESumSq/catWeightSum - eAvg*eAvg)
-                 print "%d good weight %f.2: e1=%.4f +-%.4f, e2=%.4f +-%.4f, g=%.3f, (%.3f,%.3f)"%(catCount,
-                        catWeightSum, e1Avg, e1Stddev, e2Avg, e2Stddev,
-                        math.sqrt(g1*g1 + g2*g2), g1, g2)
-
-                 #   And append to the output fits file
-                 outrec = outCat.addNew()
-                 outrec.set(g1Key, float(g1))
-                 outrec.set(g2Key, float(g2))
-                 outrec.set(filterKey, config.filter)
-                 outrec.set(seeingKey, config.seeing)
-                 outrec.set(countKey, catCount)
-                 outrec.set(gKey, math.sqrt(g1*g1 + g2*g2))
-                 outrec.set(eAvgKey, eAvg)
-                 outrec.set(eStdKey, eStddev)
-                 outrec.set(e1StdKey, e1Stddev)
-                 outrec.set(e2StdKey, e2Stddev)
-                 outrec.set(e1AvgKey, e1Avg)
-                 outrec.set(e2AvgKey, e2Avg)
-
-                 count = count + catCount
-                 allCount = allCount + len(sourceCat)
+            nanCount = nanCount + catNanCount
+            count = count + catCount
+            allCount = allCount + len(sourceCat)
 
     outCat.writeFits(os.path.join(baseDir, outFile))
     print "Total from all subfields: %d measured out of %d, %d had a nan measuremnt"%(count,
            allCount, nanCount)
-    for i in range(len(flagCount)):
-        if flagCount[i] > 0:
-            print flagNames[i], ": ", flagCount[i]
+    for i in range(len(flagCounts)):
+        if flagCounts[i] > 0:
+            print flagNames[i], ": ", flagCounts[i]
 
 if __name__ == "__main__":
 #   analyzeShearTest main program:
