@@ -155,8 +155,85 @@ def analyzeCat(sourceCat, config, flagCounts=None, flagKeys=None, flagNames=None
              catWeightSum, e1Avg, e1Stddev, e2Avg, e2Stddev)
     return e1Avg, e1Stddev, e2Avg, e2Stddev, eAvg, eStddev, catCount, catNanCount
 
-def runAnal(baseDir, outFile, config, test=None):
+# Resample the source catalog and return as a newCat
+# Note that the resampling has to be done in pairs, so we create an index of each
+# galaxy and its pair using information from the epoch_catalog created by great3sims
+# When we select a galaxy from the sampling file, we must also take its pair.
+def resampleCat(sourceCat, epochFile, lookupFile):
+    if not os.path.isfile(lookupFile):
+        makeLookup(epochFile, lookupFile)
+    lookupCat = afwTable.BaseCatalog.readFits(lookupFile)
+    newCat = afwTable.SourceCatalog(sourceCat)
+    length = len(sourceCat)
+    lookupDict = dict()
+    galKey = lookupCat.getSchema().find("gal").key
+    pairKey = lookupCat.getSchema().find("pair").key
+    # create a has from the lookup catalog, saving both directions of the pairing.
+    # some catalogs only have one of the pair.
+    for lookup in lookupCat:
+        lookupDict[lookup.get(galKey)] = lookup.get(pairKey)
+        lookupDict[lookup.get(pairKey)] = lookup.get(galKey)
+    for i in range(0, length, 2):
+        index = random.randint(0, length - 1)
+        pair_index = lookupDict[index]
+        newCat[i] = sourceCat[index]
+        newCat[i+1] = sourceCat[pair_index]
+    return newCat
 
+def isNear(value1, value2, diff, tol):
+     return abs(abs(value1 - value2) - diff) < tol
+
+# Make a lookup of galaxies and their pairs.  Save to disk as it may be needed later
+def makeLookup(epochCatName, lookupCatName):
+    epochCat = afwTable.BaseCatalog.readFits(epochCatName)
+    schema = epochCat.getSchema()
+    lookup = dict()
+    keys = []
+    for name in ("cosmos_ident", "gal_sn", "bulge_n", "bulge_hlr", "bulge_q", "bulge_flux", "disk_hlr", "disk_q", "disk_flux"):
+        keys.append(schema.find(name).key)
+    bulgeThetaKey = schema.find("bulge_beta_radians").key
+    diskThetaKey = schema.find("disk_beta_radians").key
+
+    for i in range(len(epochCat)):
+        if i in lookup.values():
+            continue
+        source = epochCat[i]
+        for j in range(i+1, len(epochCat)):
+            fail = False
+            for key in keys:
+                if not source.get(key) == epochCat[j].get(key):
+                    fail = True
+                    break
+            if fail:
+                continue
+            thetai = epochCat[i].get(bulgeThetaKey)
+            thetaj = epochCat[j].get(bulgeThetaKey)
+            if not isNear(thetai, thetaj, math.pi/2.0, .05):
+                continue
+            thetai = epochCat[i].get(diskThetaKey)
+            thetaj = epochCat[j].get(diskThetaKey)
+            if not thetai == 0.0 and not isNear(thetai, thetaj, math.pi/2.0, .05):
+                continue
+            if j in lookup.values():
+                continue
+            lookup[i] = j
+            lookup[j] = i
+            break
+        if not i in lookup.keys():
+            print lookupCatName, "Failed to find match", i
+            lookup[i] = -1
+    schema = afwTable.Schema()
+    galKey = schema.addField("gal", type = int, doc = "index of record in a source catalog")
+    pairKey = schema.addField("pair", type = int, doc = "index of record in a source catalog")
+    lookupCat = afwTable.BaseCatalog(schema)
+    for key in lookup.keys():
+        pair = lookup[key]
+        rec = lookupCat.addNew()
+        rec.set(galKey, key)
+        rec.set(pairKey, pair)
+    lookupCat.writeFits(lookupCatName)
+
+def runAnal(baseDir, outFile, config, test=None, resample=False):
     #  Create a summary table of the src*.fits tables in baseDir
     schema = afwTable.Schema()
     filterKey = schema.addField("filter", type = int, doc = "filter 2 or 3 used in PhoSim psf generator.")
@@ -209,8 +286,6 @@ def runAnal(baseDir, outFile, config, test=None):
 
     for subfield in range(config.n_subfields):
         for epoch in range(config.n_epochs):
-
-
             # Open the src.fits file for the current subfield and epoch.
             if not test is None:
                 sourceFile = os.path.join(os.path.join(baseDir, test), "src-%03d.fits"%subfield)
@@ -234,7 +309,13 @@ def runAnal(baseDir, outFile, config, test=None):
                         flagKeys.append(sourceCat.getSchema().find(name).getKey())
                         flagCounts.append(0)
                         flagNames.append(name)
-
+            # bootsitrap resample the source catalog using if requested
+            if resample:
+                epochFile = os.path.join(os.path.join(baseDir), "control", "ground", "constant",
+                                         "epoch_catalog-%03d-%01d.fits"%(subfield, epoch))
+                lookupFile = os.path.join(os.path.join(baseDir), "control", "ground", "constant",
+                                          "lookup-%03d-%01d.fits"%(subfield, epoch))
+                sourceCat = resampleCat(sourceCat, epochFile, lookupFile)
             (e1Avg, e1Stddev, e2Avg, e2Stddev, eAvg, eStddev, catCount, catNanCount) = \
                 analyzeCat(sourceCat, config, flagCounts, flagKeys, flagNames)
 
@@ -273,6 +354,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("base_dir", type=str, help="Name of the directory containing run_params file")
     parser.add_argument("-o", "--out_file", type=str, help="Name of the catalog for output", default=None)
+    parser.add_argument("-r", "--resample", type=int,
+                         help="Resample source catalog, append this number to anal filename",
+                         default=None)
     parser.add_argument("-t", "--test", type=str, help="Type of the test (set of source tables)",
                         default=None)
     args = parser.parse_args()
@@ -286,4 +370,4 @@ if __name__ == "__main__":
     #   open the config file for this run
     config = RunShearConfig()
     config.load(os.path.join(args.base_dir, "shear.config"))
-    runAnal(args.base_dir, out_file, config, test=args.test)
+    runAnal(args.base_dir, args.out_file, config, test=args.test, resample=args.resample)
