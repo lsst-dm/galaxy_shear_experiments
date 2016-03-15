@@ -46,7 +46,7 @@ import lsst.afw.table as afwTable
 from lsst.galaxy_shear.shearConfig import RunShearConfig
 
 # do the analysis on a single source catalog, and return the statistics
-# if flagCounts is defined, an accumulator is kept of  
+# if flagCounts is defined, an accumulator is kept of
 
 def analyzeCat(sourceCat, config, flagCounts=None, flagKeys=None, flagNames=None):
     #   The shape type can be "moments" or "ellipticity"
@@ -173,7 +173,7 @@ def runAnal(baseDir, outFile, config, test=None):
     e1StdKey = schema.addField("e1Std", type = float, doc = "stddev e for the sources in this subfield")
     e2AvgKey = schema.addField("e2Avg", type = float, doc = "e2 deviation from g2, for nsub subfields")
     e2StdKey = schema.addField("e2Std", type = float, doc = "stddev e for the sources in this subfield")
-    
+
     outCat = afwTable.BaseCatalog(schema)
 
     #   The shape type can be "moments" or "ellipticity"
