@@ -46,14 +46,16 @@ If multiple files are specified, it show a graph comparing m1, b1, m2, and b2 fo
 multiple test runs specified.
 """
 
-def runPlot(analysis_file, useFilter, useSeeing, useIndex=None, display=1):
+def runPlot(analysis_file, base=None, useFilter=None, useSeeing=None, display=1, verbose=False):
 
     # input file is the analyis of a set of subfields, all from the same measurement run
     # It must be named "anal_test.fits", where "test" is the name of a single run.
     # By convention, "s", "n", and "r" are for the stampsize, nGrowFootprints, and nInitialRadii tests
     # and "a" is for a particular SPA parameterization, such as "aDoubleShapelet"
-
-    subfieldCat = afwTable.BaseCatalog.readFits(analysis_file)
+    if base is None:
+        subfieldCat = afwTable.BaseCatalog.readFits(analysis_file)
+    else:
+        subfieldCat = afwTable.BaseCatalog.readFits(os.path.join(base, analysis_file))
 
     # Keys for fetching data from the output table
     schema = subfieldCat.getSchema()
@@ -144,8 +146,9 @@ def runPlot(analysis_file, useFilter, useSeeing, useIndex=None, display=1):
     nPoints = len(g1)
 
     # print the results to the console
-    print "Fits for %s %d/%d sources, m1:%.6f+-%.6f, b1: %.6f+-%.6f m2:%.6f+-%.6f b2:%.6f+-%.6f"%(
-           analysis_file, nSources, nPoints, m1, m1err, b1, b1err, m2, m2err, b2, b2err)
+    if verbose:
+        print "%d/%d sources, m1:%.6f+-%.6f, b1: %.6f+-%.6f m2:%.6f+-%.6f b2:%.6f+-%.6f"%(
+           nSources, nPoints, m1, m1err, b1, b1err, m2, m2err, b2, b2err)
     # plot a first order fit
     if display:
         import matplotlib.pyplot as plot
@@ -185,16 +188,16 @@ if __name__ == "__main__":
     parser.add_argument("-a", "--analysis_file", type=str, help="Analysis fits file", default=None)
     parser.add_argument("-t", "----test", type=str, help="type of test: s, n, r", default=None)
     parser.add_argument("-f", "--filter", type=int, help="filter to be used for plotting", default=None)
-    parser.add_argument("-b", "--index", type=int,
-                        help="index of filter to be used for plotting", default=None)
+    parser.add_argument("-b", "--base", help="directory containing shear.config", type = str)
     parser.add_argument("-s", "--seeing", type=float, help="seeing to be used for plotting", default=None)
     parser.add_argument("-d", "--display", type=int, help="display the resulting plot", default=1)
+    parser.add_argument("-m", "--multiplier", type=float, help="multiplier for errors", default=1.0)
     args = parser.parse_args()
     test_parameter = None
     #  If this is must a single analysis file, just display the fit
     if args.test is None:
-        nPoints, m1, m1err, b1, b1err, m2, m2err, b2, b2err = runPlot(args.analysis_file, args.filter,
-                                                                      args.seeing, useIndex=None,
+        nPoints, m1, m1err, b1, b1err, m2, m2err, b2, b2err = runPlot(args.analysis_file, base,
+                                                                      args.filter, args.seeing,
                                                                       display=args.display)
     #  But if it is a test involving multiple runs, call runPlot multiple times, then display a graph of all the fits.
     else:
@@ -233,9 +236,9 @@ if __name__ == "__main__":
                 display = True
             else:
                 display = False
-            nPoints, m1, m1err, b1, b1err, m2, m2err, b2, b2err = runPlot(file, args.filter,
-                                                                          args.seeing, useIndex=None,
-                                                                          display=display)
+            nPoints, m1, m1err, b1, b1err, m2, m2err, b2, b2err = runPlot(file, args.base,
+                                                                          args.filter, args.seeing,
+                                                                          verbose=False, display=display)
             m1s.append(m1)
             m2s.append(m2)
             b1s.append(b1)
@@ -280,8 +283,8 @@ if __name__ == "__main__":
 
             m1s = numpy.array(m1s, dtype=float)
             m2s = numpy.array(m2s, dtype=float)
-            m1errs = numpy.array(m1errs, dtype=float)
-            m2errs = numpy.array(m2errs, dtype=float)
+            m1errs = args.multiplier*numpy.array(m1errs, dtype=float)
+            m2errs = args.multiplier*numpy.array(m2errs, dtype=float)
             # put both graphs on the same units scale
             yrange = 2.0 * max((m1s.max() - m1s.min() + m1errs.max(), m2s.max() - m2s.min() + m2errs.max()))
             # plot the data with error bars
@@ -300,8 +303,8 @@ if __name__ == "__main__":
             # plot the data with error bars
             b1s = numpy.array(b1s, dtype=float)
             b2s = numpy.array(b2s, dtype=float)
-            b1errs = numpy.array(b1errs, dtype=float)
-            b2errs = numpy.array(b2errs, dtype=float)
+            b1errs = args.multiplier*numpy.array(b1errs, dtype=float)
+            b2errs = args.multiplier*numpy.array(b2errs, dtype=float)
             # put both graphs on the same units scale
             yrange = 2.0 * max((b1s.max() - b1s.min() + b1errs.max(), b2s.max() - b2s.min() + b2errs.max()))
             ax2.set_xlim(testnumbers.min() - margin, testnumbers.max() + margin)

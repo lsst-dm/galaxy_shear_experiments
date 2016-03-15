@@ -1,4 +1,6 @@
 import argparse
+import glob
+import math
 import os
 import shutil
 import signal
@@ -13,6 +15,7 @@ import lsst.afw.table
 from great3sims import constants, run
 from lsst.galaxy_shear.shearConfig import RunShearConfig
 from lsst.galaxy_shear.analyzeShearTest import runAnal
+from lsst.galaxy_shear.plotShearTest import runPlot
 
 def waitforpids(pidlist, waituntil=0):
     """
@@ -120,7 +123,7 @@ def writeMeasurementOverrides(tempPath, config, test, clobber):
         fout.write('model = "%s"\n'%(model,))
         fout.write('config.measurement.plugins["modelfit_ShapeletPsfApprox"].sequence=[model]\n')
         fout.write('config.measurement.plugins["modelfit_CModel"].psfName=model\n')
-        fout.write('config.measurement.plugins["modelfit_ShapeletPsfApprox"]' + 
+        fout.write('config.measurement.plugins["modelfit_ShapeletPsfApprox"]' +
                    '.models[model].optimizer.maxOuterIterations = 3000\n')
     fout.close()
 
@@ -128,8 +131,8 @@ def writeMeasurementOverrides(tempPath, config, test, clobber):
 # basedir is the directory containing the galsim catalogs. configuration is in basedir/shear.config
 # out_dir is the location where the measurement outputs are stored
 def runShear(base, out_dir, tests, forks=1, clobber=1,
-             great3=False, galsim=False, meas=False, anal=False, join=False,
-             subfield_start=None, subfield_end=None):
+             great3=False, galsim=False, meas=False, anal=False, join=False, resample=None,
+             error_bootstrap=False, subfield_start=None, subfield_end=None):
 
     # The config file for all shear tasks is in the base directory.
     # It should never be modified, and once it is written, it is definitive.
@@ -292,25 +295,28 @@ def runShear(base, out_dir, tests, forks=1, clobber=1,
     # This file summarizes the measurement statistics for each subfield
     if anal:
         for test in tests:
-            outfile = "anal.fits"
-        else:
-            outfile = "anal_%s.fits"%test
-        for test in [test]:
-                if os.path.isfile(os.path.join(base, outfile)) and not clobber:
-                    continue
-                if forks > 1:
-                    if len(pidlist) >= forks:
-                        waitforpids(pidlist, waitutil=forks-1)
-                    pid = os.fork()
-                    if pid:
-                        # we are the parent
-                        pidlist.append(pid)
-                    else:
-                        # we are the child
-                        runAnal(base, outfile, config, test=test)
-                        sys.exit(0)
+            if test is None:
+                outfile = "anal"
+            else:
+                outfile = os.path.join(test, "anal_%s"%test)
+            if not resample is None:
+                outfile = outfile + "_%d"%resample
+            outfile = outfile + ".fits"
+            if os.path.isfile(os.path.join(base, outfile)) and not clobber:
+                continue
+            if forks > 1:
+                if len(pidlist) >= forks:
+                    waitforpids(pidlist, waitutil=forks-1)
+                pid = os.fork()
+                if pid:
+                    # we are the parent
+                    pidlist.append(pid)
                 else:
-                        runAnal(base, outfile, config, test=test)
+                    # we are the child
+                    runAnal(base, outfile, config, test=test)
+                    sys.exit(0)
+            else:
+                    runAnal(base, outfile, config, test=test, resample=resample)
         if forks > 1:
             waitforpids(pidlist)
 
@@ -328,6 +334,75 @@ def runShear(base, out_dir, tests, forks=1, clobber=1,
         if not outCat is None:
             outCat.writeFits(os.path.join(base, "sum_anal.fits_"))
 
+    if error_bootstrap:
+
+        # Do an error recalculation using the analysis of resampled data in the anal_[0-9]*.fits files
+        # There is one file for each resampled data set.
+        # the appended number is just a sequence number of the bootstrap resampled data.
+        for test in tests:
+            if test is None:
+                files = glob.glob(os.path.join(base, "anal_[0-9]*.fits"))
+                fileroot = os.path.join(base, test, "anal_")
+            else:
+                files = glob.glob(os.path.join(base, test, "anal_%s_[0-9]*.fits"%test))
+                fileroot = os.path.join(base, test, "anal_%s_"%test)
+            # zero the accumulators
+            count = 0
+            b1Sum = 0
+            m1Sum = 0
+            b1SumSq = 0
+            m1SumSq = 0
+            b2Sum = 0
+            m2Sum = 0
+            b2SumSq = 0
+            m2SumSq = 0
+            b1errSum = 0
+            m1errSum = 0
+            b2errSum = 0
+            m2errSum = 0
+            for file in files:
+                end = file.find(".fits")
+                number = int(file[len(fileroot):end])
+                if number < subfield_start or number > subfield_end:
+                    continue
+                nPoints, m1, m1err, b1, b1err, m2, m2err, b2, b2err = \
+                    runPlot(file, display=False, verbose=True)
+                m1Sum = m1Sum + m1
+                m1SumSq = m1SumSq + m1*m1
+                b1Sum = b1Sum + b1
+                b1SumSq = b1SumSq + b1*b1
+                m2Sum = m2Sum + m2
+                m2SumSq = m2SumSq + m2*m2
+                b2Sum = b2Sum + b2
+                b2SumSq = b2SumSq + b2*b2
+                m1errSum = m1errSum + m1err
+                b1errSum = b1errSum + b1err
+                m2errSum = m2errSum + m2err
+                b2errSum = b2errSum + b2err
+                count = count + 1
+            if count > 2:
+                b1OldErr = b1errSum/count
+                m1OldErr = m1errSum/count
+                b2OldErr = b2errSum/count
+                m2OldErr = m2errSum/count
+                print "b1err avg: ", b1OldErr
+                print "m1err avg: ", m1OldErr
+                print "b2err avg: ", b2OldErr
+                print "m2err avg: ", m2OldErr
+                print "Error report for %s with %d trials:"%(test, count)
+                b1NewErr = math.sqrt((b1SumSq - b1Sum*b1Sum/count)/(count-1))
+                m1NewErr = math.sqrt((m1SumSq - m1Sum*m1Sum/count)/(count-1))
+                b2NewErr = math.sqrt((b2SumSq - b2Sum*b2Sum/count)/(count-1))
+                m2NewErr = math.sqrt((m2SumSq - m2Sum*m2Sum/count)/(count-1))
+
+                print "b1: avg: %.6f, err %.6f, new: %.6f, factor: %6f"%(b1Sum/count, b1OldErr,
+                       b1NewErr, b1NewErr/b1OldErr)
+                print "m1: avg: %.6f, err %.6f, new: %.6f, factor: %6f"%(m1Sum/count, m1OldErr,
+                       m1NewErr, m1NewErr/m1OldErr)
+                print "b2: avg: %.6f, err %.6f, new: %.6f, factor: %6f"%(b1Sum/count, b1OldErr,
+                       b2NewErr, b1NewErr/b1OldErr)
+                print "m2: avg: %.6f, err %.6f, new: %.6f, factor: %6f"%(m2Sum/count, m2OldErr,
+                       m2NewErr, m2NewErr/m2OldErr)
 if __name__ == "__main__":
     """
     This main program reads data for multiple runs in filter, seeing, and shear value, and
@@ -358,6 +433,7 @@ if __name__ == "__main__":
         default=1)
     parser.add_argument("-x", "--subfield_start", type=int, help="start on specific subfield", default=None)
     parser.add_argument("-y", "--subfield_end", type=int, help="end on specific subfield", default=None)
+
     parser.add_argument("-t", "--tests", help="run on specific data subsets")
     parser.add_argument("-p", "--processes", help="Maximum umber of forks to allow", type = int, default=1)
     parser.add_argument("-3", "--great3", action='store_true',
@@ -365,7 +441,9 @@ if __name__ == "__main__":
     parser.add_argument("-g", "--galsim", action='store_true', help="run galsim to create galaxy image.fits")
     parser.add_argument("-m", "--meas", action='store_true', help="measure image.fits, result in src.fits")
     parser.add_argument("-a", "--anal", action='store_true', help="Analyze src.fits, result in anal.fits")
+    parser.add_argument("-r", "--resample", type=int, help="Analyze src.fits, with resampling number")
     parser.add_argument("-j", "--join", action='store_true', help="join multiple anal.fits to sum_anal.fits")
+    parser.add_argument("-e", "--error_bootstrap", action='store_true', help="estimate error from multiple bootstraps")
 
     args = parser.parse_args()
 
@@ -415,6 +493,7 @@ if __name__ == "__main__":
     # Now run runShear on the requested tasks, one time for each base directory created.
     for base in baseDirs:
         runShear(base, args.out_dir, tests, clobber=args.clobber, forks=args.processes, great3=args.great3,
-             galsim=args.galsim, meas=args.meas, anal=args.anal, join=args.join,
+             galsim=args.galsim, meas=args.meas, anal=args.anal, join=args.join, resample=args.resample,
+             error_bootstrap=args.error_bootstrap,
              subfield_start=args.subfield_start, subfield_end=args.subfield_end)
 
