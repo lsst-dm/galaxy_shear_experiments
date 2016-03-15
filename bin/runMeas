@@ -1,0 +1,6 @@
+#!/bin/bash
+export basedir=$1
+export test=$2
+date
+python $GALAXY_SHEAR_EXPERIMENTS_DIR/bin/processShearTest.py $basedir/control/ground/constant --configfile=my.py --id subfield=0..0 epoch=0..0 --output $basedir/$test
+date
