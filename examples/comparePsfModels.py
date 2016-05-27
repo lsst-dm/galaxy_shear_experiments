@@ -232,11 +232,11 @@ def compareResults(cat1, cat2):
         xy = cat2[i].get(key2).getIxy()
         e1_2 = (xx - yy) / (xx + yy)
         e2_2 = 2 * xy / (xx + yy)
-        val1 = (e1_1 - e1_2) #/(2.0 * (e1_1 + e1_2))
+        val1 = (e1_1 - e1_2)
         val1Sum += val1
         val1SS += val1 * val1
         val1Count += 1
-        val2 = (e2_1 - e2_2) #/(2.0 * (e2_1 + e2_2))
+        val2 = (e2_1 - e2_2)
         val2Sum += val2
         val2SS += val2 * val2
         val2Count += 1
