@@ -56,9 +56,9 @@ class ShapeCompare():
             valSum = 0.0
             valSS = 0.0
             valCount= 0
-            for val in vals: 
+            for val in vals:
                 if clip is None or val < clip:
-                    valSum = valSum + val 
+                    valSum = valSum + val
                     valSS = valSS + val * val
                     valCount = valCount + 1
                 else:
@@ -88,7 +88,9 @@ class ShapeCompare():
         return diffs.mean(), diffs.std()
 
     #   make a square gaussian array of size x size and width sigma
-    def makeGaussianArray(self, size, sigma, xc=0.0, yc=0.0):
+    def makeGaussianArray(self, size, sigma):
+        xc = size/2
+        yc = size/2
         image = lsst.afw.image.ImageD(lsst.afw.geom.Box2I(lsst.afw.geom.Point2I(0,0),
                     lsst.afw.geom.Point2I(size,size)))
         array = numpy.ndarray(shape = (size, size), dtype = numpy.float64)
@@ -138,10 +140,29 @@ class ShapeCompare():
         config.plugins["modelfit_CModel"].psfName = psfName
         return config
 
+    def makePsf(self, params, size):
+        if len(params) % 2 != 0:
+            raise Exception("Must specify amplitude and sigma for each Gaussian")
+        for i in range(len(params)/2):
+            amp = float(params[2*i])
+            sigma = float(params[2*i + 1])
+            temp = self.makeGaussianArray(size, sigma)
+            temp *= amp
+            print "component %d: amp = %f, sigma = %f"%(i, amp, sigma)
+            if i == 0:
+                array = temp
+            else:
+                array += temp
+        image = lsst.afw.image.ImageD(array)
+        image.writeFits("psf.fits")
+        kernel = lsst.afw.math.FixedKernel(image)
+        return lsst.meas.algorithms.KernelPsf(kernel)
+
+
     #   Run a test of the specified model, collecting measurement information in
     #   a source table and returning it.  Also print information about the time
-    #   and the quality of the PsfApprox 
-    def runShapeCompare(self, template, config, model, count=None, verbose=True):
+    #   and the quality of the PsfApprox
+    def runShapeCompare(self, template, config, model, count=None, psf=None, verbose=True):
         schema = lsst.afw.table.SourceTable.makeMinimalSchema()
         task = lsst.meas.base.SingleFrameMeasurementTask(config=config, schema=schema)
         measCat = lsst.afw.table.SourceCatalog(schema)
@@ -153,9 +174,11 @@ class ShapeCompare():
         psfDiffs = []
         psfStds = []
         if len(files) > count:
-            files = files[0:count] 
+            files = files[0:count]
         for file in files:
             exposure = lsst.afw.image.ExposureF(file)
+            if not psf is None:
+                exposure.setPsf(psf)
             dettask = lsst.meas.algorithms.SourceDetectionTask()
             dettask.log.setThreshold(dettask.log.WARN)
             task.log.setThreshold(task.log.WARN)
@@ -180,8 +203,8 @@ class ShapeCompare():
                     if plugin.find("PsfApprox") > 0:
                         timeSPA = time.time() - startTime
                         diff = self.comparePsfResults(exposure.getPsf(), measRecord.get(msfKey))
-                        psfDiffs.append(diff[0]) 
-                        psfStds.append(diff[1]) 
+                        psfDiffs.append(diff[0])
+                        psfStds.append(diff[1])
                         if verbose:
                             print "DIFFS: ", diff
                         #iters = measRecord.get("meas_extensions_ngmix_EmPsfApprox_iterations")
@@ -189,8 +212,8 @@ class ShapeCompare():
                         #print "EMRunner for %d returned: "%nGauss, iters, fdiff
                     if plugin == "modelfit_CModel":
                         timeCM = time.time() - startTime
-                ellipse = measRecord.get(quadKey) 
-                if verbose: 
+                ellipse = measRecord.get(quadKey)
+                if verbose:
                     print "CMODEL: ", file[file.find("exp_"):], measRecord.getCentroid(), ellipse
                     print "SPA=", timeSPA, "CM=", timeCM
                 timesCM.append(timeCM)
@@ -198,7 +221,7 @@ class ShapeCompare():
             except Exception as e:
                 print plugin, "EXCEPTION", e.message
                 continue
-        if len(timesSPA) > 2: 
+        if len(timesSPA) > 2:
             print "SUMMARY using PsfApprox %s with %d exposures"%(model, len(timesSPA))
             avg, stdev = self.getStats(timesSPA)
             print "   PsfApprox runtime: %.4f sec. +- %.6f sec."%(avg, stdev)
@@ -255,14 +278,21 @@ if __name__ == "__main__":
     parser.add_argument("-v", "--verbose", action='store_true', help="print verbose statistics")
     parser.add_argument("-m", "--models", type=str, help="SingleGaussian,...,nGauss#", default=None)
     parser.add_argument("-c", "--compare", action='store_true', help="compare CModels")
+    parser.add_argument("-p", "--psf", type=str, help="specify a PSF with one or more Gaussians", default=None)
     args = parser.parse_args()
     test = ShapeCompare()
+    psf = None
+    if not args.psf is None:
+        psf = test.makePsf(args.psf.split(","), 67)
+    else:
+        psf = None
+
     if not args.models is None:
         models = args.models.split(",")
         results = {}
         for model in models:
            config = test.getConfig(model)
-           results[model] = test.runShapeCompare(os.path.join(dataDir, args.template), config, model, count=args.number, verbose=args.verbose)
+           results[model] = test.runShapeCompare(os.path.join(dataDir, args.template), config, model, count=args.number, psf=psf, verbose=args.verbose)
         if args.compare:
             print "CModel comparison: for %s vs %s:"%(models[0], models[1])
             results2 = compareResults(results[models[0]], results[models[1]])

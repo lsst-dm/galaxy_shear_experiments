@@ -30,6 +30,21 @@ import pyfits
 
 import lsst.afw.math as afwMath
 import lsst.afw.table as afwTable
+def printStats(xarray):
+    sum = 0.
+    count = 0
+    ss = 0.
+    xmax = - 1000000
+    xmin =   1000000
+    for x in xarray:
+        if xmin > x:
+            xmin = x
+        if xmax < x:
+            xmax = x
+        count = count+1
+        sum = sum + x
+        ss = ss + x*x
+    return count, sum/count, math.sqrt((ss - (sum*sum/count))/(count-1)), xmax-xmin
 
 """
 plotShearTest is a python program which is used make a applied vs. measured shear plot for
@@ -264,6 +279,10 @@ if __name__ == "__main__":
                     start = start + 1
                 testlabels.append(file[start:end])
                 testnumbers.append(float(len(testlabels)))
+        print "M1: ", printStats(m1s)
+        print "B1: ", printStats(b1s)
+        print "M2: ", printStats(m2s)
+        print "B2: ", printStats(b2s)
 
         if args.display:
             print testnumbers
